@@ -1,0 +1,153 @@
+package auth
+
+import (
+	"context"
+	"errors"
+	"strings"
+
+	"encore.app/db"
+	"encore.dev/beta/auth"
+	"encore.dev/beta/errs"
+	"golang.org/x/crypto/bcrypt"
+	"gorm.io/driver/postgres"
+	"gorm.io/gorm"
+)
+
+//encore:service
+type Service struct {
+	db          *gorm.DB
+	rateLimiter *RateLimiter
+}
+
+//encore:authhandler
+func (s *Service) AuthHandler(ctx context.Context, token string) (auth.UID, *UserData, error) {
+	if token == "" {
+		return "", nil, nil
+	}
+	claims, err := parseJWT(token)
+	if err != nil {
+		return "", nil, errs.B().Msg("unauthorized: invalid token").Err()
+	}
+	return auth.UID(claims.UserID), &UserData{ID: claims.UserID, Email: claims.Email}, nil
+}
+
+func initService() (*Service, error) {
+	// Initialize secrets
+	initSecrets()
+
+	// Initialize GORM database connection
+	gormDB, err := gorm.Open(postgres.New(postgres.Config{
+		Conn: db.ProtisanDB.Stdlib(),
+	}), &gorm.Config{
+		DisableForeignKeyConstraintWhenMigrating: true,
+	})
+	if err != nil {
+		return nil, errs.B().Msg("failed to connect to database").Err()
+	}
+
+	// Initialize rate limiter for auth endpoints
+	rateLimiter := &RateLimiter{
+		visitors: make(map[string]*visitor),
+	}
+	go rateLimiter.cleanupVisitors()
+
+	return &Service{db: gormDB, rateLimiter: rateLimiter}, nil
+}
+
+//encore:api public method=POST path=/auth/register
+func (s *Service) Register(ctx context.Context, req *RegisterRequest) (*AuthResponse, error) {
+	if req == nil || req.Email == "" || req.Password == "" {
+		return nil, errs.B().Msg("invalid request").Err()
+	}
+
+	// Rate limiting: max 3 registrations per hour per email
+	if !s.rateLimiter.isAllowed("register:"+req.Email, 3) {
+		return nil, errs.B().Msg("too many registration attempts, please try again later").Err()
+	}
+
+	// Normalize email to lowercase
+	normalizedEmail := strings.ToLower(strings.TrimSpace(req.Email))
+
+	// Validate email format first
+	if err := validateEmail(normalizedEmail); err != nil {
+		return nil, err
+	}
+
+	// Check if user already exists
+	var existingUser User
+	if err := s.db.Where("email = ?", normalizedEmail).First(&existingUser).Error; err == nil {
+		return nil, errs.B().Msg("user already exists").Err()
+	} else if !errors.Is(err, gorm.ErrRecordNotFound) {
+		return nil, errs.B().Msg("database error").Err()
+	}
+
+	// Validate password strength
+	if passwordErrors := validatePassword(req.Password); len(passwordErrors) > 0 {
+		return nil, errs.B().Msg("password requirements not met: " + strings.Join(passwordErrors, ", ")).Err()
+	}
+
+	// Hash the password
+	hashedPassword, err := bcrypt.GenerateFromPassword([]byte(req.Password), bcryptCost)
+	if err != nil {
+		return nil, errs.B().Msg("failed to hash password").Err()
+	}
+
+	// Create new user
+	newUser := User{
+		Email:         normalizedEmail,
+		PasswordHash:  string(hashedPassword),
+		EmailVerified: false,
+	}
+
+	if err := s.db.Create(&newUser).Error; err != nil {
+		return nil, errs.B().Msg("failed to create user").Err()
+	}
+
+	// Generate JWT token
+	token, err := s.generateJWT(newUser.ID, newUser.Email)
+	if err != nil {
+		return nil, errs.B().Msg("failed to generate token").Err()
+	}
+
+	return &AuthResponse{Token: token}, nil
+}
+
+//encore:api public method=POST path=/auth/login
+func (s *Service) Login(ctx context.Context, req *LoginRequest) (*AuthResponse, error) {
+	if req == nil || req.Email == "" || req.Password == "" {
+		return nil, errs.B().Msg("invalid request").Err()
+	}
+
+	// Rate limiting: max 5 login attempts per minute per email
+	if !s.rateLimiter.isAllowed("login:"+req.Email, 5) {
+		return nil, errs.B().Msg("too many login attempts, please try again later").Err()
+	}
+
+	// Normalize and validate email format
+	normalizedEmail := strings.ToLower(strings.TrimSpace(req.Email))
+	if err := validateEmail(normalizedEmail); err != nil {
+		return nil, err
+	}
+
+	// Find user by email
+	var user User
+	if err := s.db.Where("email = ?", normalizedEmail).First(&user).Error; err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return nil, errs.B().Msg("invalid credentials").Err()
+		}
+		return nil, errs.B().Msg("database error").Err()
+	}
+
+	// Verify password
+	if err := bcrypt.CompareHashAndPassword([]byte(user.PasswordHash), []byte(req.Password)); err != nil {
+		return nil, errs.B().Msg("invalid credentials").Err()
+	}
+
+	// Generate JWT token
+	token, err := s.generateJWT(user.ID, user.Email)
+	if err != nil {
+		return nil, errs.B().Msg("failed to generate token").Err()
+	}
+
+	return &AuthResponse{Token: token}, nil
+}
