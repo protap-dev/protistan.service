@@ -94,9 +94,11 @@ func (s *Service) Register(ctx context.Context, req *RegisterRequest) (*AuthResp
 
 	// Create new user
 	newUser := User{
-		Email:         normalizedEmail,
-		PasswordHash:  string(hashedPassword),
-		EmailVerified: false,
+		Email:           normalizedEmail,
+		PasswordHash:    string(hashedPassword),
+		EmailVerified:   false,
+		UserType:        req.UserType,
+		ProfileComplete: req.UserType == "customer",
 	}
 
 	if err := s.db.Create(&newUser).Error; err != nil {
@@ -104,7 +106,7 @@ func (s *Service) Register(ctx context.Context, req *RegisterRequest) (*AuthResp
 	}
 
 	// Generate JWT token
-	token, err := s.generateJWT(newUser.ID, newUser.Email)
+	token, err := s.generateJWT(newUser.ID, newUser.Email, newUser.UserType, newUser.ProfileComplete)
 	if err != nil {
 		return nil, errs.B().Msg("failed to generate token").Err()
 	}
@@ -144,7 +146,7 @@ func (s *Service) Login(ctx context.Context, req *LoginRequest) (*AuthResponse, 
 	}
 
 	// Generate JWT token
-	token, err := s.generateJWT(user.ID, user.Email)
+	token, err := s.generateJWT(user.ID, user.Email, user.UserType, user.ProfileComplete)
 	if err != nil {
 		return nil, errs.B().Msg("failed to generate token").Err()
 	}

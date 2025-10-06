@@ -33,7 +33,7 @@ func Test_EmailVerificationFlow(t *testing.T) {
 
 		mock.ExpectBegin()
 		mock.ExpectQuery(regexp.QuoteMeta(`INSERT INTO "users"`)).
-			WithArgs(email, sqlmock.AnyArg(), false, sqlmock.AnyArg(), sqlmock.AnyArg()).
+			WithArgs(email, sqlmock.AnyArg(), false, "customer", false, sqlmock.AnyArg(), sqlmock.AnyArg()).
 			WillReturnRows(sqlmock.NewRows([]string{"id", "email", "email_verified"}).
 				AddRow(userID, email, false))
 		mock.ExpectCommit()

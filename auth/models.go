@@ -14,12 +14,14 @@ type UserData struct {
 
 // User represents a user in the database
 type User struct {
-	ID            string    `json:"id" gorm:"primarykey;type:uuid;default:uuid_generate_v7()"`
-	Email         string    `json:"email" gorm:"index;not null;type:varchar(255)"`
-	PasswordHash  string    `json:"password_hash" gorm:"not null;type:varchar(255)"`
-	EmailVerified bool      `json:"email_verified" gorm:"default:false"`
-	CreatedAt     time.Time `json:"created_at" gorm:"autoCreateTime"`
-	UpdatedAt     time.Time `json:"updated_at" gorm:"autoUpdateTime"`
+	ID              string    `json:"id" gorm:"primarykey;type:uuid;default:uuid_generate_v7()"`
+	Email           string    `json:"email" gorm:"index;not null;type:varchar(255)"`
+	PasswordHash    string    `json:"password_hash" gorm:"not null;type:varchar(255)"`
+	EmailVerified   bool      `json:"email_verified" gorm:"default:false"`
+	UserType        string    `json:"user_type" gorm:"default:'customer'"`
+	ProfileComplete bool      `json:"profile_complete" gorm:"default:false"`
+	CreatedAt       time.Time `json:"created_at" gorm:"autoCreateTime"`
+	UpdatedAt       time.Time `json:"updated_at" gorm:"autoUpdateTime"`
 }
 
 // EmailVerificationToken represents an email verification token in the database
@@ -54,8 +56,10 @@ type PasswordResetToken struct {
 
 // JWTClaims holds custom JWT claims.
 type JWTClaims struct {
-	UserID string `json:"user_id"`
-	Email  string `json:"email"`
+	UserID          string `json:"user_id"`
+	Email           string `json:"email"`
+	UserType        string `json:"user_type"`
+	ProfileComplete bool   `json:"profile_complete"`
 	jwt.RegisteredClaims
 }
 
@@ -63,6 +67,7 @@ type JWTClaims struct {
 type RegisterRequest struct {
 	Email    string `json:"email"`
 	Password string `json:"password"`
+	UserType string `json:"user_type"`
 }
 
 type AuthResponse struct {

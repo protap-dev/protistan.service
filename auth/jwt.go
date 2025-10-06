@@ -8,10 +8,12 @@ import (
 )
 
 // generateJWT creates a JWT token for the authenticated user
-func (s *Service) generateJWT(userID, email string) (string, error) {
+func (s *Service) generateJWT(userID, email, userType string, profileComplete bool) (string, error) {
 	claims := JWTClaims{
-		UserID: userID,
-		Email:  email,
+		UserID:          userID,
+		Email:           email,
+		UserType:        userType,
+		ProfileComplete: profileComplete,
 		RegisteredClaims: jwt.RegisteredClaims{
 			ExpiresAt: jwt.NewNumericDate(time.Now().Add(24 * time.Hour)),
 			IssuedAt:  jwt.NewNumericDate(time.Now()),
