@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"encore.app/artisans/domain"
+	"encore.app/core"
 	"gorm.io/gorm"
 )
 
@@ -157,20 +158,16 @@ func (r *artisanRepository) Delete(ctx context.Context, id string) error {
 
 // WithTransaction executes a function within a database transaction
 func (r *artisanRepository) WithTransaction(ctx context.Context, fn func(domain.ArtisanRepository) error) error {
-	return r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
-		// Create a repository instance that uses the transaction
-		txRepo := &artisanRepository{db: tx}
-		return fn(txRepo)
-	})
+	return core.WithTransaction(ctx, r.db, func(db *gorm.DB) domain.ArtisanRepository {
+		return &artisanRepository{db: db}
+	}, fn)
 }
 
 // WithReadTransaction executes a function within a read-only transaction for consistency
 func (r *artisanRepository) WithReadTransaction(ctx context.Context, fn func(domain.ArtisanRepository) error) error {
-	return r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
-		// Create a repository instance that uses the transaction
-		txRepo := &artisanRepository{db: tx}
-		return fn(txRepo)
-	})
+	return core.WithReadTransaction(ctx, r.db, func(db *gorm.DB) domain.ArtisanRepository {
+		return &artisanRepository{db: db}
+	}, fn)
 }
 
 // GetDB returns the underlying database connection for complex queries
