@@ -5,7 +5,8 @@ import (
 	"errors"
 	"strings"
 
-	"encore.app/db"
+	"encore.app/core"
+	"encore.app/core/db"
 	"encore.dev/beta/auth"
 	"encore.dev/beta/errs"
 	"golang.org/x/crypto/bcrypt"
@@ -17,6 +18,7 @@ import (
 type Service struct {
 	db          *gorm.DB
 	rateLimiter *RateLimiter
+	coreSvc     *core.CoreService // Core service for shared infrastructure
 }
 
 //encore:authhandler
@@ -45,16 +47,23 @@ func initService() (*Service, error) {
 		return nil, errs.B().Msg("failed to connect to database").Err()
 	}
 
+	// Initialize core service for shared infrastructure
+	coreSvc := core.NewCoreService(gormDB)
+
 	// Initialize rate limiter for auth endpoints
 	rateLimiter := &RateLimiter{
 		visitors: make(map[string]*visitor),
 	}
 	go rateLimiter.cleanupVisitors()
 
-	return &Service{db: gormDB, rateLimiter: rateLimiter}, nil
+	return &Service{
+		db:          gormDB,
+		rateLimiter: rateLimiter,
+		coreSvc:     coreSvc,
+	}, nil
 }
 
-//encore:api public method=POST path=/auth/register
+//encore:api public method=POST path=/v0/auth/register
 func (s *Service) Register(ctx context.Context, req *RegisterRequest) (*AuthResponse, error) {
 	if req == nil || req.Email == "" || req.Password == "" {
 		return nil, errs.B().Msg("invalid request").Err()
@@ -70,6 +79,12 @@ func (s *Service) Register(ctx context.Context, req *RegisterRequest) (*AuthResp
 
 	// Validate email format first
 	if err := validateEmail(normalizedEmail); err != nil {
+		return nil, err
+	}
+
+	// Sanitize and validate user_type
+	userType := strings.ToLower(strings.TrimSpace(req.UserType))
+	if err := ValidateUserType(userType); err != nil {
 		return nil, err
 	}
 
@@ -97,8 +112,8 @@ func (s *Service) Register(ctx context.Context, req *RegisterRequest) (*AuthResp
 		Email:           normalizedEmail,
 		PasswordHash:    string(hashedPassword),
 		EmailVerified:   false,
-		UserType:        req.UserType,
-		ProfileComplete: req.UserType == "customer",
+		UserType:        userType,
+		ProfileComplete: userType == "customer",
 	}
 
 	if err := s.db.Create(&newUser).Error; err != nil {
@@ -114,7 +129,7 @@ func (s *Service) Register(ctx context.Context, req *RegisterRequest) (*AuthResp
 	return &AuthResponse{Token: token}, nil
 }
 
-//encore:api public method=POST path=/auth/login
+//encore:api public method=POST path=/v0/auth/login
 func (s *Service) Login(ctx context.Context, req *LoginRequest) (*AuthResponse, error) {
 	if req == nil || req.Email == "" || req.Password == "" {
 		return nil, errs.B().Msg("invalid request").Err()

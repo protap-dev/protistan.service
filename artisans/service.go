@@ -57,32 +57,32 @@ func initService() (*Service, error) {
 
 // API endpoints
 //
-//encore:api auth method=POST path=/artisans/profile
+//encore:api auth method=POST path=/v0/artisans/profile
 func (s *Service) CreateProfile(ctx context.Context, req *handlers.CreateProfileRequest) (*handlers.CompleteProfileResponse, error) {
 	return s.profileHandler.Create(ctx, req)
 }
 
-//encore:api auth method=PUT path=/artisans/profile
+//encore:api auth method=PUT path=/v0/artisans/profile
 func (s *Service) UpdateProfile(ctx context.Context, req *handlers.UpdateProfileRequest) (*handlers.ProfileResponse, error) {
 	return s.profileHandler.Update(ctx, req)
 }
 
-//encore:api auth method=GET path=/artisans/profile
+//encore:api auth method=GET path=/v0/artisans/profile
 func (s *Service) GetProfile(ctx context.Context) (*handlers.CompleteProfileResponse, error) {
 	return s.profileHandler.Get(ctx)
 }
 
-//encore:api public method=GET path=/artisans/profile/:id
+//encore:api public method=GET path=/v0/artisans/profile/:id
 func (s *Service) GetArtisanProfile(ctx context.Context, id string) (*domain.PublicArtisanProfile, error) {
 	return s.profileHandler.GetArtisanProfile(ctx, id)
 }
 
-//encore:api public method=GET path=/artisans/rates/:id
+//encore:api public method=GET path=/v0/artisans/rates/:id
 func (s *Service) GetArtisanRates(ctx context.Context, id string) (*handlers.GetArtisanRatesResponse, error) {
 	return s.ratesHandler.GetArtisanRates(ctx, id)
 }
 
-//encore:api auth method=PUT path=/artisans/rates
+//encore:api auth method=PUT path=/v0/artisans/rates
 func (s *Service) UpdateRates(ctx context.Context, req *handlers.UpdateArtisanRatesRequest) (*handlers.UpdateArtisanRatesResponse, error) {
 	return s.ratesHandler.UpdateRates(ctx, req)
 }

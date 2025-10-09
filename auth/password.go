@@ -11,7 +11,7 @@ import (
 	"gorm.io/gorm"
 )
 
-//encore:api public method=POST path=/auth/forgot-password
+//encore:api public method=POST path=/v0/auth/forgot-password
 func (s *Service) ForgotPassword(ctx context.Context, req *ForgotPasswordRequest) error {
 	if req == nil || req.Email == "" {
 		return errs.B().Msg("invalid request").Err()
@@ -61,7 +61,7 @@ func (s *Service) ForgotPassword(ctx context.Context, req *ForgotPasswordRequest
 	return nil
 }
 
-//encore:api public method=POST path=/auth/reset-password
+//encore:api public method=POST path=/v0/auth/reset-password
 func (s *Service) ResetPassword(ctx context.Context, req *ResetPasswordRequest) error {
 	if req == nil || req.Token == "" || req.NewPassword == "" {
 		return errs.B().Msg("invalid request").Err()

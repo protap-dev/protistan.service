@@ -2,6 +2,7 @@ package auth
 
 import (
 	"regexp"
+	"slices"
 
 	"encore.dev/beta/errs"
 	"github.com/badoux/checkmail"
@@ -40,4 +41,14 @@ func validateEmail(email string) error {
 		return errs.B().Msg("invalid email format").Err()
 	}
 	return nil
+}
+
+// ValidateUserType checks if user_type is a valid allowed value for registration
+func ValidateUserType(userType string) error {
+	// Only allow customer and artisan registration
+	validTypes := []string{"customer", "artisan"}
+	if slices.Contains(validTypes, userType) {
+		return nil
+	}
+	return errs.B().Msg("invalid user_type for registration").Err()
 }

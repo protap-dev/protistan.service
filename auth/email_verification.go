@@ -11,7 +11,7 @@ import (
 	"gorm.io/gorm"
 )
 
-//encore:api public method=POST path=/auth/send-verification-email
+//encore:api public method=POST path=/v0/auth/send-verification-email
 func (s *Service) SendVerificationEmail(ctx context.Context, req *SendVerificationEmailRequest) error {
 	if req == nil || req.Email == "" {
 		return errs.B().Msg("invalid request").Err()
@@ -69,7 +69,7 @@ func (s *Service) SendVerificationEmail(ctx context.Context, req *SendVerificati
 	return nil
 }
 
-//encore:api public method=POST path=/auth/verify-email
+//encore:api public method=POST path=/v0/auth/verify-email
 func (s *Service) VerifyEmail(ctx context.Context, req *VerifyEmailRequest) error {
 	if req == nil || req.Token == "" {
 		return errs.B().Msg("invalid request").Err()

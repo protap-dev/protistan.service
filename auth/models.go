@@ -14,7 +14,7 @@ type UserData struct {
 
 // User represents a user in the database
 type User struct {
-	ID              string    `json:"id" gorm:"primarykey;type:uuid;default:uuid_generate_v7()"`
+	ID              string    `json:"id" gorm:"primarykey;type:uuid;default:generate_uuid()"`
 	Email           string    `json:"email" gorm:"index;not null;type:varchar(255)"`
 	PasswordHash    string    `json:"password_hash" gorm:"not null;type:varchar(255)"`
 	EmailVerified   bool      `json:"email_verified" gorm:"default:false"`
@@ -26,7 +26,7 @@ type User struct {
 
 // EmailVerificationToken represents an email verification token in the database
 type EmailVerificationToken struct {
-	ID        string    `json:"id" gorm:"primarykey;type:uuid;default:uuid_generate_v7()"`
+	ID        string    `json:"id" gorm:"primarykey;type:uuid;default:generate_uuid()"`
 	UserID    string    `json:"user_id" gorm:"not null;index"`
 	Token     string    `json:"token" gorm:"unique;not null"`
 	ExpiresAt time.Time `json:"expires_at" gorm:"not null"`
@@ -45,7 +45,7 @@ type VerifyEmailRequest struct {
 
 // PasswordResetToken represents a password reset token in the database
 type PasswordResetToken struct {
-	ID        string    `json:"id" gorm:"primarykey;type:uuid;default:uuid_generate_v7()"`
+	ID        string    `json:"id" gorm:"primarykey;type:uuid;default:generate_uuid()"`
 	UserID    string    `json:"user_id" gorm:"not null;index"`
 	Token     string    `json:"token" gorm:"unique;not null"`
 	ExpiresAt time.Time `json:"expires_at" gorm:"not null"`

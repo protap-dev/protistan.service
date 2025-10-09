@@ -7,70 +7,70 @@ import (
 	"sync"
 	"time"
 
-	"gorm.io/gorm"
 	"encore.app/core/cache"
+	"gorm.io/gorm"
 )
 
 // ============================================================================
-// PHASE 2: ENHANCED MONITORING - HEALTH CHECKS AND METRICS
+// MONITORING - HEALTH CHECKS AND METRICS
 // ============================================================================
 
 // HealthStatus represents the overall health of the core service and its dependencies
 type HealthStatus struct {
-	Service    string            `json:"service"`
-	Status     string            `json:"status"`     // "healthy", "degraded", "unhealthy"
-	Timestamp  time.Time         `json:"timestamp"`
-	Uptime     string            `json:"uptime"`
-	Database   DatabaseHealth    `json:"database"`
-	Cache      CacheHealth       `json:"cache"`
-	Checks     map[string]string `json:"checks"`
+	Service   string            `json:"service"`
+	Status    string            `json:"status"` // "healthy", "degraded", "unhealthy"
+	Timestamp time.Time         `json:"timestamp"`
+	Uptime    string            `json:"uptime"`
+	Database  DatabaseHealth    `json:"database"`
+	Cache     CacheHealth       `json:"cache"`
+	Checks    map[string]string `json:"checks"`
 }
 
 // DatabaseHealth represents database connectivity and performance metrics
 type DatabaseHealth struct {
-	Status      string        `json:"status"`
-	Connection  string        `json:"connection"`
-	Latency     time.Duration `json:"latency_ms"`
-	PoolStats   PoolStats     `json:"pool_stats"`
-	LastError   string        `json:"last_error,omitempty"`
+	Status     string        `json:"status"`
+	Connection string        `json:"connection"`
+	Latency    time.Duration `json:"latency_ms"`
+	PoolStats  PoolStats     `json:"pool_stats"`
+	LastError  string        `json:"last_error,omitempty"`
 }
 
 // CacheHealth represents cache system health and performance
 type CacheHealth struct {
-	Status       string        `json:"status"`
-	Type         string        `json:"type"`
-	HitRate      float64       `json:"hit_rate"`
-	ItemsCount   int           `json:"items_count"`
-	Latency      time.Duration `json:"latency_ms"`
-	LastError    string        `json:"last_error,omitempty"`
+	Status     string        `json:"status"`
+	Type       string        `json:"type"`
+	HitRate    float64       `json:"hit_rate"`
+	ItemsCount int           `json:"items_count"`
+	Latency    time.Duration `json:"latency_ms"`
+	LastError  string        `json:"last_error,omitempty"`
 }
 
 // PoolStats represents database connection pool statistics
 type PoolStats struct {
-	OpenConnections     int `json:"open_connections"`
-	InUseConnections    int `json:"in_use_connections"`
-	IdleConnections     int `json:"idle_connections"`
-	MaxOpenConnections  int `json:"max_open_connections"`
+	OpenConnections    int `json:"open_connections"`
+	InUseConnections   int `json:"in_use_connections"`
+	IdleConnections    int `json:"idle_connections"`
+	MaxOpenConnections int `json:"max_open_connections"`
 }
 
 // MetricsData contains comprehensive performance metrics
 type MetricsData struct {
-	Service      string            `json:"service"`
-	Timestamp    time.Time         `json:"timestamp"`
-	Uptime       string            `json:"uptime"`
-	RequestCount RequestMetrics    `json:"requests"`
-	Database     DatabaseMetrics   `json:"database"`
-	Cache        CacheMetrics      `json:"cache"`
-	System       SystemMetrics     `json:"system"`
+	Service      string          `json:"service"`
+	Timestamp    time.Time       `json:"timestamp"`
+	Uptime       string          `json:"uptime"`
+	RequestCount RequestMetrics  `json:"requests"`
+	Database     DatabaseMetrics `json:"database"`
+	Cache        CacheMetrics    `json:"cache"`
+	System       SystemMetrics   `json:"system"`
 }
 
 // RequestMetrics tracks API request patterns
 type RequestMetrics struct {
-	TotalRequests    int64         `json:"total_requests"`
-	RequestsPerSec   float64       `json:"requests_per_second"`
-	AverageLatency   time.Duration `json:"average_latency_ms"`
-	ErrorRate        float64       `json:"error_rate"`
-	StatusCodes      map[string]int `json:"status_codes"`
+	TotalRequests  int64          `json:"total_requests"`
+	RequestsPerSec float64        `json:"requests_per_second"`
+	AverageLatency time.Duration  `json:"average_latency_ms"`
+	ErrorRate      float64        `json:"error_rate"`
+	StatusCodes    map[string]int `json:"status_codes"`
 }
 
 // DatabaseMetrics tracks database performance
@@ -94,11 +94,11 @@ type CacheMetrics struct {
 
 // SystemMetrics tracks system resource usage
 type SystemMetrics struct {
-	Goroutines    int           `json:"goroutines"`
-	MemoryUsed    string        `json:"memory_used_mb"`
-	MemoryAlloc   string        `json:"memory_alloc_mb"`
-	GCCycles      int64         `json:"gc_cycles"`
-	NextGC        string        `json:"next_gc_mb"`
+	Goroutines  int    `json:"goroutines"`
+	MemoryUsed  string `json:"memory_used_mb"`
+	MemoryAlloc string `json:"memory_alloc_mb"`
+	GCCycles    int64  `json:"gc_cycles"`
+	NextGC      string `json:"next_gc_mb"`
 }
 
 // healthMonitor manages health checks and metrics collection
@@ -109,25 +109,25 @@ type healthMonitor struct {
 	cacheManager cache.CacheManager
 
 	// Metrics tracking
-	requestCount   int64
-	errorCount     int64
-	totalLatency   time.Duration
-	statusCodes    map[string]int
+	requestCount int64
+	errorCount   int64
+	totalLatency time.Duration
+	statusCodes  map[string]int
 
 	// Cache metrics
-	cacheHits      int64
-	cacheMisses    int64
-	cacheItems     int
-	cacheLatency   time.Duration
+	cacheHits    int64
+	cacheMisses  int64
+	cacheItems   int
+	cacheLatency time.Duration
 }
 
 // newHealthMonitor creates a new health monitoring system
 func newHealthMonitor(db *gorm.DB, cacheManager cache.CacheManager) *healthMonitor {
 	return &healthMonitor{
-		startTime:   time.Now(),
-		db:          db,
+		startTime:    time.Now(),
+		db:           db,
 		cacheManager: cacheManager,
-		statusCodes: make(map[string]int),
+		statusCodes:  make(map[string]int),
 	}
 }
 
@@ -290,11 +290,11 @@ func (c *CoreService) Metrics() MetricsData {
 			StatusCodes:    monitor.statusCodes,
 		},
 		Database: DatabaseMetrics{
-			QueryCount:     0, // Would be populated by actual query tracking
-			AverageLatency: time.Duration(0),
-			ErrorCount:     0,
+			QueryCount:      0, // Would be populated by actual query tracking
+			AverageLatency:  time.Duration(0),
+			ErrorCount:      0,
 			ConnectionsUsed: 0,
-			SlowQueries:    0,
+			SlowQueries:     0,
 		},
 		Cache: CacheMetrics{
 			Hits:           monitor.cacheHits,
@@ -314,11 +314,11 @@ func (c *CoreService) getSystemMetrics() SystemMetrics {
 	runtime.ReadMemStats(&memStats)
 
 	return SystemMetrics{
-		Goroutines: runtime.NumGoroutine(),
-		MemoryUsed: fmt.Sprintf("%.2f", float64(memStats.Alloc)/1024/1024),
+		Goroutines:  runtime.NumGoroutine(),
+		MemoryUsed:  fmt.Sprintf("%.2f", float64(memStats.Alloc)/1024/1024),
 		MemoryAlloc: fmt.Sprintf("%.2f", float64(memStats.TotalAlloc)/1024/1024),
-		GCCycles:   int64(memStats.NumGC),
-		NextGC:     fmt.Sprintf("%.2f", float64(memStats.NextGC)/1024/1024),
+		GCCycles:    int64(memStats.NumGC),
+		NextGC:      fmt.Sprintf("%.2f", float64(memStats.NextGC)/1024/1024),
 	}
 }
 
