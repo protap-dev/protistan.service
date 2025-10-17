@@ -346,6 +346,36 @@ func (s *Service) ListAddresses(ctx context.Context) (*ListAddressesResponse, er
 }
 
 // ============================================================================
+// INTERNAL APIs (for service-to-service calls)
+// ============================================================================
+
+// GetAddressByID - Internal API for other services
+//
+// ValidateAddressOwnership - Internal API to validate address belongs to user
+//
+//encore:api private method=GET path=/internal/customers/addresses/:addressID/validate/:userID
+func (s *Service) ValidateAddressOwnership(ctx context.Context, addressID uuid.UUID, userID uuid.UUID) (*CustomerAddress, error) {
+	// Get all addresses for the user
+	addresses, err := s.addressRepo.GetByUserID(ctx, userID.String())
+	if err != nil {
+		s.logger.LogError(ctx, "get_user_addresses", err)
+		return nil, err
+	}
+
+	// Check if the address ID is in the user's addresses
+	addressIDStr := addressID.String()
+	for _, addr := range addresses {
+		if addr.ID == addressIDStr {
+			return &addr, nil
+		}
+	}
+
+	// Address not found in user's addresses
+	s.logger.LogError(ctx, "address_not_owned_by_user", fmt.Errorf("address %s not owned by user %s", addressIDStr, userID.String()))
+	return nil, ErrAddressNotFound
+}
+
+// ============================================================================
 // HELPER FUNCTIONS
 // ============================================================================
 
