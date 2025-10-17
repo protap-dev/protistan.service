@@ -42,4 +42,3 @@ $$ LANGUAGE plpgsql;
 COMMENT ON FUNCTION generate_uuid IS 'Generates UUIDv7 when available, falls back to UUIDv4. Provides optimal indexing performance with timestamp-based UUIDs while maintaining compatibility across environments';
 COMMENT ON EXTENSION "uuid-ossp" IS 'Provides UUID generation functions including uuid_generate_v4() as fallback for environments without UUIDv7 support';
 COMMENT ON FUNCTION update_updated_at_column IS 'Generic trigger function to update updated_at timestamp on record modifications';
-
