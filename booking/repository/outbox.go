@@ -19,10 +19,11 @@ func (r *bookingRepository) CreateEventInOutbox(ctx context.Context, event *doma
 	}
 
 	dbModel := &outboxEventDBModel{
-		ID:         binternal.GenerateUUID(),
-		Topic:      getTopicForEvent(event),
-		Data:       jsonData,
-		InsertedAt: time.Now(),
+		ID:          binternal.GenerateUUID(),
+		Topic:       getTopicForEvent(event),
+		Data:        jsonData,
+		InsertedAt:  time.Now(),
+		ProcessedAt: nil, // initially nil, set when processed
 	}
 	return r.db.WithContext(ctx).Create(dbModel).Error
 }
@@ -33,7 +34,7 @@ func (r *bookingRepository) CreateEventInOutbox(ctx context.Context, event *doma
 func getTopicForEvent(event *domain.BookingEvent) string {
 	switch event.Status {
 	case domain.BookingRequested:
-		return "booking.status"
+		return "booking.created"
 	case domain.BookingOfferPending:
 		return "booking.offered"
 	case domain.BookingOfferRejected:

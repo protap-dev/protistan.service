@@ -18,18 +18,20 @@ import (
 
 // BookingsHandler handles booking-related API logic
 type BookingsHandler struct {
-	repo       domain.BookingRepository
-	validator  domain.BookingValidator
-	logger     binternal.ServiceLogger
-	cache      cache.CacheManager
-	coreSvc    *core.CoreService
-	authHelper *binternal.AuthHelper
-	publisher  domain.EventPublisher
+	repo           domain.BookingRepository
+	validator      domain.BookingValidator
+	offerValidator domain.OfferValidator
+	logger         binternal.ServiceLogger
+	cache          cache.CacheManager
+	coreSvc        *core.CoreService
+	authHelper     *binternal.AuthHelper
+	publisher      domain.EventPublisher
 }
 
 func NewBookingsHandler(
 	repo domain.BookingRepository,
 	validator domain.BookingValidator,
+	offerValidator domain.OfferValidator,
 	logger binternal.ServiceLogger,
 	cache cache.CacheManager,
 	coreSvc *core.CoreService,
@@ -37,14 +39,20 @@ func NewBookingsHandler(
 	publisher domain.EventPublisher,
 ) *BookingsHandler {
 	return &BookingsHandler{
-		repo:       repo,
-		validator:  validator,
-		logger:     logger,
-		cache:      cache,
-		coreSvc:    coreSvc,
-		authHelper: authHelper,
-		publisher:  publisher,
+		repo:           repo,
+		validator:      validator,
+		offerValidator: offerValidator,
+		logger:         logger,
+		cache:          cache,
+		coreSvc:        coreSvc,
+		authHelper:     authHelper,
+		publisher:      publisher,
 	}
+}
+
+// GetRepository returns the repository for external access
+func (h *BookingsHandler) GetRepository() domain.BookingRepository {
+	return h.repo
 }
 
 // =============================
@@ -57,17 +65,21 @@ func (h *BookingsHandler) CreateBooking(ctx context.Context, req *CreateBookingR
 		return nil, err
 	}
 
+	// Check if customer is requesting a specific artisan
+	isSpecificArtisan := req.SpecificArtisanID != nil && *req.SpecificArtisanID != ""
+
 	booking := &domain.Booking{
 		CustomerID:            userCtx.ID,
 		ServiceCategoryID:     req.ServiceCategoryID,
 		Title:                 req.Title,
 		Description:           req.Description,
 		CustomerAddressID:     req.CustomerAddressID,
-		Status:                domain.BookingPendingPayment,
+		Status:                domain.BookingRequested,
 		Priority:              req.Priority,
 		ScheduledAt:           req.ScheduledAt,
 		EstimatedDurationMins: req.EstimatedDurationMins,
 		Metadata:              req.Metadata,
+		IsSpecificArtisan:     isSpecificArtisan,
 		CreatedAt:             time.Now(),
 		UpdatedAt:             time.Now(),
 		Version:               1,
@@ -117,17 +129,24 @@ func (h *BookingsHandler) CreateBooking(ctx context.Context, req *CreateBookingR
 		return nil, binternal.ErrDatabaseError
 	}
 
-	h.cache.Set(ctx, binternal.BookingCacheKey(booking.ID), booking, 30*time.Minute)
+	h.cache.Set(ctx, binternal.BookingCacheKey(booking.ID), booking, binternal.DefaultServiceConfig().Cache.BookingTTL)
 
-	go func() {
-		h.publisher.PublishCreatedEvent(context.Background(), &domain.BookingEvent{
-			BookingID:      booking.ID,
-			Status:         booking.Status,
-			PreviousStatus: "",
-			Timestamp:      time.Now(),
-			UserID:         userCtx.ID,
+	// Create and publish created event within transaction context for atomicity
+	event := &domain.BookingEvent{
+		BookingID:      booking.ID,
+		Status:         booking.Status,
+		PreviousStatus: "",
+		Timestamp:      time.Now(),
+		UserID:         userCtx.ID,
+	}
+
+	// Use the repository's outbox method for atomic event publishing
+	if err := h.repo.CreateEventInOutbox(ctx, event); err != nil {
+		h.logger.Error(ctx, "failed to publish booking created event", err, map[string]interface{}{
+			"booking_id": booking.ID,
 		})
-	}()
+		// Don't fail the request if event publishing fails - the booking was created successfully
+	}
 
 	return h.toResponse(booking), nil
 }
@@ -143,83 +162,37 @@ func (h *BookingsHandler) UpdateBookingStatus(ctx context.Context, id string, re
 		return nil, err
 	}
 
-	var previousStatus domain.BookingStatus
-
-	err = h.repo.WithTransaction(ctx, func(txRepo domain.BookingRepository) error {
-		current, err := txRepo.GetByID(ctx, id)
-		if err != nil {
-			if errors.Is(err, domain.ErrBookingNotFound) {
-				return binternal.ErrNotFound
-			}
-			return binternal.ErrDatabaseError
+	// Get current booking for authorization and transition validation
+	current, err := h.repo.GetByID(ctx, id)
+	if err != nil {
+		if errors.Is(err, domain.ErrBookingNotFound) {
+			return nil, binternal.ErrNotFound
 		}
+		return nil, binternal.ErrDatabaseError
+	}
 
-		if err := binternal.AuthorizeStatusUpdate(ctx, userRole, userCtx.ID, current); err != nil {
-			return err
-		}
+	if err := binternal.AuthorizeStatusUpdate(ctx, userRole, userCtx.ID, current); err != nil {
+		return nil, err
+	}
 
-		newStatus := domain.BookingStatus(req.Status)
-		if !domain.CanTransition(current.Status, newStatus) {
-			return errs.B().Code(errs.InvalidArgument).Msg("invalid status transition").
-				Meta("from", string(current.Status)).
-				Meta("to", req.Status).Err()
-		}
+	newStatus := domain.BookingStatus(req.Status)
+	if !domain.CanTransition(current.Status, newStatus) {
+		return nil, errs.B().Code(errs.InvalidArgument).Msg("invalid status transition").
+			Meta("from", string(current.Status)).
+			Meta("to", req.Status).Err()
+	}
 
-		previousStatus = current.Status
-		current.Status = newStatus
-
-		if err := txRepo.Update(ctx, current); err != nil {
-			var optimisticLockErr *domain.ErrOptimisticLockFailure
-			if errors.As(err, &optimisticLockErr) {
-				return errs.B().Code(errs.FailedPrecondition).Msg("booking has been modified by another process").Err()
-			}
-			return binternal.ErrDatabaseError
-		}
-
-		historyEvent := &domain.BookingEvent{
-			BookingID:      id,
-			Status:         newStatus,
-			PreviousStatus: previousStatus,
-			Timestamp:      time.Now(),
-			UserID:         userCtx.ID,
-			ArtisanID:      current.ArtisanID,
-			Reason:         req.Reason,
-		}
-		return txRepo.CreateStatusHistory(ctx, historyEvent)
-	})
-
+	// Use the internal helper for the actual status update
+	err = h.UpdateBookingStatusInternal(ctx, id, newStatus, userCtx.ID, req.Reason, current)
 	if err != nil {
 		return nil, err
 	}
 
-	// Re-fetch the booking to get the latest data (including db-generated fields)
+	// Re-fetch the booking to get the latest data for response
 	updatedBooking, err := h.repo.GetByID(ctx, id)
 	if err != nil {
 		return nil, binternal.ErrDatabaseError
 	}
-
-	h.cache.Delete(ctx, binternal.BookingCacheKey(id))
-	h.cache.Set(ctx, binternal.BookingCacheKey(id), updatedBooking, 30*time.Minute)
-
-	// Publish events in a background context to prevent cancellation
-	go func() {
-		backgroundCtx := context.Background()
-		event := &domain.BookingEvent{
-			BookingID:      id,
-			Status:         updatedBooking.Status,
-			PreviousStatus: previousStatus,
-			Timestamp:      time.Now(),
-			UserID:         userCtx.ID,
-			ArtisanID:      updatedBooking.ArtisanID,
-			Reason:         req.Reason,
-		}
-
-		h.publisher.PublishStatusEvent(backgroundCtx, event)
-
-		if updatedBooking.Status == domain.BookingCancelled {
-			h.publisher.PublishCancelledEvent(backgroundCtx, event)
-		}
-	}()
 
 	return h.toResponse(updatedBooking), nil
 }
@@ -257,7 +230,7 @@ func (h *BookingsHandler) GetBooking(ctx context.Context, id string) (*BookingRe
 		return nil, err
 	}
 
-	h.cache.Set(ctx, binternal.BookingCacheKey(id), booking, 30*time.Minute)
+	h.cache.Set(ctx, binternal.BookingCacheKey(id), booking, binternal.DefaultServiceConfig().Cache.BookingTTL)
 
 	return h.toResponse(booking), nil
 }
@@ -291,9 +264,15 @@ func (h *BookingsHandler) ListBookings(ctx context.Context, params *ListBookings
 	if params.Status != "" {
 		status := domain.BookingStatus(params.Status)
 		validStatus := slices.Contains([]domain.BookingStatus{
-			domain.BookingPendingPayment,
 			domain.BookingRequested,
-			domain.BookingAccepted,
+			domain.BookingOfferPending,
+			domain.BookingOfferRejected,
+			domain.BookingAssigned,
+			domain.BookingPendingQuote,
+			domain.BookingQuoteProposed,
+			domain.BookingQuoteAccepted,
+			domain.BookingPaymentPending,
+			domain.BookingConfirmed,
 			domain.BookingEnroute,
 			domain.BookingInProgress,
 			domain.BookingCompleted,
@@ -316,8 +295,10 @@ func (h *BookingsHandler) ListBookings(ctx context.Context, params *ListBookings
 	// Get the total count before applying pagination
 	totalCount := len(bookings)
 
-	limit := 20
-	if params.Limit > 0 && params.Limit < 100 {
+	// Use centralized configuration for pagination
+	config := binternal.DefaultServiceConfig()
+	limit := config.Pagination.DefaultLimit
+	if params.Limit > 0 && params.Limit <= config.Pagination.MaxLimit {
 		limit = params.Limit
 	}
 
@@ -349,23 +330,47 @@ func (h *BookingsHandler) CancelBooking(ctx context.Context, id string, req *Can
 		return nil, err
 	}
 
+	// Get current booking for authorization
+	current, err := h.repo.GetByID(ctx, id)
+	if err != nil {
+		if errors.Is(err, domain.ErrBookingNotFound) {
+			return nil, binternal.ErrNotFound
+		}
+		return nil, binternal.ErrDatabaseError
+	}
+
+	if err := binternal.AuthorizeCancel(ctx, userCtx.ID, current); err != nil {
+		return nil, err
+	}
+
+	// Use the internal helper for the actual status update
+	err = h.UpdateBookingStatusInternal(ctx, id, domain.BookingCancelled, userCtx.ID, req.Reason, current)
+	if err != nil {
+		return nil, err
+	}
+
+	// Re-fetch the booking to get the latest data for response
+	updatedBooking, err := h.repo.GetByID(ctx, id)
+	if err != nil {
+		return nil, binternal.ErrDatabaseError
+	}
+
+	return h.toResponse(updatedBooking), nil
+}
+
+// UpdateBookingStatusInternal is a helper method that centralizes common status update logic
+func (h *BookingsHandler) UpdateBookingStatusInternal(ctx context.Context, bookingID string, newStatus domain.BookingStatus, userID string, reason *string, current *domain.Booking) error {
 	var previousStatus domain.BookingStatus
 
-	err = h.repo.WithTransaction(ctx, func(txRepo domain.BookingRepository) error {
-		current, err := txRepo.GetByID(ctx, id)
-		if err != nil {
-			if errors.Is(err, domain.ErrBookingNotFound) {
-				return binternal.ErrNotFound
-			}
-			return binternal.ErrDatabaseError
-		}
+	err := h.repo.WithTransaction(ctx, func(txRepo domain.BookingRepository) error {
+		// Use the passed current booking instead of fetching it again
+		// current, err := txRepo.GetByID(ctx, bookingID)  // Remove this line
+		// if err != nil { ... }  // Remove this block
 
-		if err := binternal.AuthorizeCancel(ctx, userCtx.ID, current); err != nil {
-			return err
-		}
-
+		// Store previous status for event publishing
 		previousStatus = current.Status
-		current.Status = domain.BookingCancelled
+		current.Status = newStatus
+		current.UpdatedAt = time.Now()
 
 		if err := txRepo.Update(ctx, current); err != nil {
 			var optimisticLockErr *domain.ErrOptimisticLockFailure
@@ -375,50 +380,83 @@ func (h *BookingsHandler) CancelBooking(ctx context.Context, id string, req *Can
 			return binternal.ErrDatabaseError
 		}
 
-		historyEvent := &domain.BookingEvent{
-			BookingID:      id,
-			Status:         domain.BookingCancelled,
+		// Create main status change event
+		statusEvent := &domain.BookingEvent{
+			BookingID:      bookingID,
+			Status:         newStatus,
 			PreviousStatus: previousStatus,
 			Timestamp:      time.Now(),
-			UserID:         userCtx.ID,
+			UserID:         userID,
 			ArtisanID:      current.ArtisanID,
-			Reason:         req.Reason,
+			Reason:         reason,
 		}
-		return txRepo.CreateStatusHistory(ctx, historyEvent)
+
+		// Write main status event to outbox
+		if err := txRepo.CreateEventInOutbox(ctx, statusEvent); err != nil {
+			return err
+		}
+
+		// Publish additional events based on new status (all atomic within transaction)
+		switch newStatus {
+		case domain.BookingQuoteAccepted:
+			quoteEvent := &domain.BookingEvent{
+				BookingID:      bookingID,
+				Status:         newStatus,
+				PreviousStatus: previousStatus,
+				Timestamp:      time.Now(),
+				UserID:         userID,
+				ArtisanID:      current.ArtisanID,
+				Reason:         reason,
+			}
+			if err := txRepo.CreateEventInOutbox(ctx, quoteEvent); err != nil {
+				return err
+			}
+		case domain.BookingConfirmed:
+			paymentEvent := &domain.BookingEvent{
+				BookingID:      bookingID,
+				Status:         newStatus,
+				PreviousStatus: previousStatus,
+				Timestamp:      time.Now(),
+				UserID:         userID,
+				ArtisanID:      current.ArtisanID,
+				Reason:         reason,
+			}
+			if err := txRepo.CreateEventInOutbox(ctx, paymentEvent); err != nil {
+				return err
+			}
+		case domain.BookingCancelled:
+			cancelledEvent := &domain.BookingEvent{
+				BookingID:      bookingID,
+				Status:         newStatus,
+				PreviousStatus: previousStatus,
+				Timestamp:      time.Now(),
+				UserID:         userID,
+				ArtisanID:      current.ArtisanID,
+				Reason:         reason,
+			}
+			if err := txRepo.CreateEventInOutbox(ctx, cancelledEvent); err != nil {
+				return err
+			}
+		}
+
+		return nil
 	})
 
 	if err != nil {
-		return nil, err
+		return err
 	}
 
-	// Re-fetch the booking to get the latest data (including db-generated fields)
-	updatedBooking, err := h.repo.GetByID(ctx, id)
+	// Re-fetch the booking to get the latest data and update cache
+	updatedBooking, err := h.repo.GetByID(ctx, bookingID)
 	if err != nil {
-		return nil, binternal.ErrDatabaseError
+		return binternal.ErrDatabaseError
 	}
 
-	h.cache.Delete(ctx, binternal.BookingCacheKey(id))
-	h.cache.Set(ctx, binternal.BookingCacheKey(id), updatedBooking, 30*time.Minute)
+	// Update cache
+	h.cache.Delete(ctx, binternal.BookingCacheKey(bookingID))
+	h.cache.Set(ctx, binternal.BookingCacheKey(bookingID), updatedBooking, binternal.DefaultServiceConfig().Cache.BookingTTL)
 
-	// Publish events in a background context to prevent cancellation
-	go func() {
-		backgroundCtx := context.Background()
-		event := &domain.BookingEvent{
-			BookingID:      id,
-			Status:         domain.BookingCancelled,
-			PreviousStatus: previousStatus,
-			Timestamp:      time.Now(),
-			UserID:         userCtx.ID,
-			ArtisanID:      updatedBooking.ArtisanID,
-			Reason:         req.Reason,
-		}
-
-		h.publisher.PublishStatusEvent(backgroundCtx, event)
-
-		h.publisher.PublishCancelledEvent(backgroundCtx, event)
-	}()
-
-	return h.toResponse(updatedBooking), nil
+	return nil
 }
 
 func (h *BookingsHandler) getUserRole(ctx context.Context, userID string) (string, error) {
@@ -460,5 +498,21 @@ func (h *BookingsHandler) toResponse(booking *domain.Booking) *BookingResponse {
 		Metadata:              booking.Metadata,
 		CreatedAt:             booking.CreatedAt,
 		UpdatedAt:             booking.UpdatedAt,
+	}
+}
+
+func (h *BookingsHandler) toOfferResponse(offer *domain.BookingOffer) *OfferResponse {
+	return &OfferResponse{
+		ID:           offer.ID,
+		BookingID:    offer.BookingID,
+		ArtisanID:    offer.ArtisanID,
+		Status:       string(offer.Status),
+		OfferedBy:    offer.OfferedBy,
+		OfferedAt:    offer.OfferedAt,
+		ExpiresAt:    offer.ExpiresAt,
+		RespondedAt:  offer.RespondedAt,
+		RejectReason: offer.RejectReason,
+		CreatedAt:    offer.CreatedAt,
+		UpdatedAt:    offer.UpdatedAt,
 	}
 }

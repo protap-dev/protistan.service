@@ -74,9 +74,24 @@ type outboxEventDBModel struct {
 	Topic      string         `gorm:"column:topic;not null"`
 	Data       datatypes.JSON `gorm:"column:data;type:jsonb;not null"`
 	InsertedAt time.Time      `gorm:"column:inserted_at;not null;default:now()"`
+	ProcessedAt *time.Time    `gorm:"column:processed_at"` // Production-ready: track when event was processed
 }
 
 func (outboxEventDBModel) TableName() string {
+	return "outbox"
+}
+
+// OutboxEvent represents an event stored in the outbox table (for relay operations)
+type OutboxEvent struct {
+	ID          string     `gorm:"column:id;primaryKey"`
+	Topic       string     `gorm:"column:topic;not null"`
+	Data        []byte     `gorm:"column:data;type:jsonb;not null"`
+	InsertedAt  time.Time  `gorm:"column:inserted_at;not null;default:now()"`
+	ProcessedAt *time.Time `gorm:"column:processed_at"` // Production-ready: track when event was processed
+}
+
+// TableName returns the table name for the OutboxEvent model
+func (OutboxEvent) TableName() string {
 	return "outbox"
 }
 

@@ -1,6 +1,10 @@
 package internal
 
-import "fmt"
+import (
+	"fmt"
+
+	"github.com/google/uuid"
+)
 
 // MaxInt returns the maximum of two ints
 func MaxInt(a, b int) int {
@@ -21,4 +25,9 @@ func MinInt(a, b int) int {
 // BookingCacheKey builds the cache key for a booking
 func BookingCacheKey(id string) string {
 	return fmt.Sprintf("booking:%s", id)
+}
+
+// GenerateUUID generates a new UUID for outbox events and other purposes
+func GenerateUUID() string {
+	return uuid.New().String()
 }

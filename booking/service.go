@@ -4,12 +4,14 @@ import (
 	"context"
 
 	"encore.app/booking/domain"
-	"encore.app/booking/handlers"
 	"encore.app/booking/events"
+	"encore.app/booking/handlers"
 	binternal "encore.app/booking/internal"
+	"encore.app/booking/relay"
 	"encore.app/booking/repository"
 	"encore.app/core"
 	"encore.app/core/cache"
+	"encore.dev/pubsub"
 	"encore.dev/storage/sqldb"
 	"gorm.io/driver/postgres"
 	"gorm.io/gorm"
@@ -18,6 +20,7 @@ import (
 //encore:service
 type Service struct {
 	bookingsHandler *handlers.BookingsHandler
+	relay          *relay.OutboxRelay // For graceful shutdown
 }
 
 // BookingDB initializes the booking service database
@@ -42,39 +45,145 @@ func initService() (*Service, error) {
 	logger := binternal.NewServiceLogger("booking")
 	authHelper := binternal.NewAuthHelper(logger)
 	validator := domain.NewBookingValidator()
+	offerValidator := domain.NewOfferValidator()
 	repo := repository.NewBookingRepository(coreSvc.DB())
 	cache := cache.NewInMemoryCache()
 	publisher := events.NewEventPublisher()
 
 	// Initialize handlers layer
-	bookingsHandler := handlers.NewBookingsHandler(repo, validator, logger, cache, coreSvc, authHelper, publisher)
+	bookingsHandler := handlers.NewBookingsHandler(repo, validator, offerValidator, logger, cache, coreSvc, authHelper, publisher)
 
-	return &Service{
+	// Initialize and start outbox relay with production-ready configuration
+	relayConfig := relay.Config{
+		PollingInterval: binternal.DefaultOutboxRelayConfig().PollingInterval,
+		BatchSize:       binternal.DefaultOutboxRelayConfig().BatchSize,
+		MaxRetries:      binternal.DefaultOutboxRelayConfig().MaxRetries,
+		RetryBaseDelay:  binternal.DefaultOutboxRelayConfig().RetryBaseDelay,
+		RetryMaxDelay:   binternal.DefaultOutboxRelayConfig().RetryMaxDelay,
+		AuditRetention:  binternal.DefaultOutboxRelayConfig().AuditRetention,
+	}
+	relayInstance := relay.NewOutboxRelay(coreSvc.DB(), publisher, relayConfig)
+	go relayInstance.Start(context.Background())
+
+	svc := &Service{
 		bookingsHandler: bookingsHandler,
-	}, nil
+		relay:          relayInstance, // Store reference for graceful shutdown
+	}
+
+	return svc, nil
 }
 
-//encore:api auth method=POST path=/bookings
-func (s *Service) CreateBooking(ctx context.Context, req *handlers.CreateBookingRequest) (*handlers.BookingResponse, error) {
-	return s.bookingsHandler.CreateBooking(ctx, req)
-}
-
-//encore:api auth method=PUT path=/bookings/:id/status
+//encore:api auth method=PUT path=/v0/bookings/:id/status
 func (s *Service) UpdateBookingStatus(ctx context.Context, id string, req *handlers.UpdateStatusRequest) (*handlers.BookingResponse, error) {
 	return s.bookingsHandler.UpdateBookingStatus(ctx, id, req)
 }
 
-//encore:api auth method=GET path=/bookings/:id
+//encore:api auth method=GET path=/v0/bookings/:id
 func (s *Service) GetBooking(ctx context.Context, id string) (*handlers.BookingResponse, error) {
 	return s.bookingsHandler.GetBooking(ctx, id)
 }
 
-//encore:api auth method=GET path=/bookings
+//encore:api auth method=GET path=/v0/bookings
 func (s *Service) ListBookings(ctx context.Context, params *handlers.ListBookingsParams) (*handlers.ListBookingsResponse, error) {
 	return s.bookingsHandler.ListBookings(ctx, params)
 }
 
-//encore:api auth method=POST path=/bookings/:id/cancel
+//encore:api auth method=POST path=/v0/bookings/:id/cancel
 func (s *Service) CancelBooking(ctx context.Context, id string, req *handlers.CancelBookingRequest) (*handlers.BookingResponse, error) {
 	return s.bookingsHandler.CancelBooking(ctx, id, req)
+}
+
+// =============================
+// Offer Management Endpoints
+// =============================
+
+//encore:api auth method=POST path=/v0/bookings/:id/offers
+func (s *Service) OfferBooking(ctx context.Context, id string, req *handlers.OfferBookingRequest) (*handlers.OfferResponse, error) {
+	return s.bookingsHandler.OfferBooking(ctx, id, req)
+}
+
+//encore:api auth method=POST path=/v0/offers/:id/accept
+func (s *Service) AcceptOffer(ctx context.Context, id string, req *handlers.AcceptOfferRequest) (*handlers.BookingResponse, error) {
+	return s.bookingsHandler.AcceptOffer(ctx, id, req)
+}
+
+//encore:api auth method=POST path=/v0/offers/:id/reject
+func (s *Service) RejectOffer(ctx context.Context, id string, req *handlers.RejectOfferRequest) (*handlers.OfferResponse, error) {
+	return s.bookingsHandler.RejectOffer(ctx, id, req)
+}
+
+//encore:api auth method=GET path=/v0/bookings/:id/offers
+func (s *Service) ListBookingOffers(ctx context.Context, id string) (*handlers.ListOffersResponse, error) {
+	return s.bookingsHandler.ListBookingOffers(ctx, id)
+}
+
+//encore:api auth method=GET path=/v0/artisan/offers
+func (s *Service) ListArtisanOffers(ctx context.Context, params *handlers.ListOffersParams) (*handlers.ListOffersResponse, error) {
+	return s.bookingsHandler.ListArtisanOffers(ctx, params)
+}
+
+// =============================
+// Event Subscribers
+// =============================
+
+var _ = pubsub.NewSubscription(
+	events.QuoteAcceptedTopic, "handle-quote-accepted",
+	pubsub.SubscriptionConfig[*domain.BookingEvent]{
+		Handler: pubsub.MethodHandler((*Service).OnQuoteAccepted),
+	},
+)
+
+var _ = pubsub.NewSubscription(
+	events.QuoteRejectedTopic, "handle-quote-rejected",
+	pubsub.SubscriptionConfig[*domain.BookingEvent]{
+		Handler: pubsub.MethodHandler((*Service).OnQuoteRejected),
+	},
+)
+
+var _ = pubsub.NewSubscription(
+	events.PaymentConfirmedTopic, "handle-payment-confirmed",
+	pubsub.SubscriptionConfig[*domain.BookingEvent]{
+		Handler: pubsub.MethodHandler((*Service).OnPaymentConfirmed),
+	},
+)
+
+// TODO: Add subscription for quote.proposed when quotes service is implemented
+// var _ = pubsub.NewSubscription(
+//     events.QuoteProposedTopic, "handle-quote-proposed",
+//     pubsub.SubscriptionConfig[*domain.BookingEvent]{
+//         Handler: pubsub.MethodHandler((*Service).OnQuoteProposed),
+//     },
+// )
+
+func (s *Service) OnQuoteProposed(ctx context.Context, event *domain.BookingEvent) error {
+	current, err := s.bookingsHandler.GetRepository().GetByID(ctx, event.BookingID)
+	if err != nil {
+		return err
+	}
+	return s.bookingsHandler.UpdateBookingStatusInternal(ctx, event.BookingID, domain.BookingQuoteProposed, event.UserID, nil, current)
+}
+
+func (s *Service) OnQuoteAccepted(ctx context.Context, event *domain.BookingEvent) error {
+	current, err := s.bookingsHandler.GetRepository().GetByID(ctx, event.BookingID)
+	if err != nil {
+		return err
+	}
+	return s.bookingsHandler.UpdateBookingStatusInternal(ctx, event.BookingID, domain.BookingQuoteAccepted, event.UserID, nil, current)
+}
+
+func (s *Service) OnQuoteRejected(ctx context.Context, event *domain.BookingEvent) error {
+	current, err := s.bookingsHandler.GetRepository().GetByID(ctx, event.BookingID)
+	if err != nil {
+		return err
+	}
+	// If quote is rejected, transition back to Assigned so artisan can propose a new quote or customer can re-offer
+	return s.bookingsHandler.UpdateBookingStatusInternal(ctx, event.BookingID, domain.BookingAssigned, event.UserID, event.Reason, current)
+}
+
+func (s *Service) OnPaymentConfirmed(ctx context.Context, event *domain.BookingEvent) error {
+	current, err := s.bookingsHandler.GetRepository().GetByID(ctx, event.BookingID)
+	if err != nil {
+		return err
+	}
+	return s.bookingsHandler.UpdateBookingStatusInternal(ctx, event.BookingID, domain.BookingConfirmed, event.UserID, nil, current)
 }
