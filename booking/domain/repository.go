@@ -32,6 +32,14 @@ type BookingRepository interface {
 	CreateStatusHistory(ctx context.Context, history *BookingEvent) error
 	SoftDelete(ctx context.Context, id string) error
 
+	// Offer management
+	CreateOffer(ctx context.Context, offer *BookingOffer) error
+	GetOfferByID(ctx context.Context, offerID string) (*BookingOffer, error)
+	GetOffersByBookingID(ctx context.Context, bookingID string) ([]*BookingOffer, error)
+	GetOffersByArtisanID(ctx context.Context, artisanID string, status BookingOfferStatus) ([]*BookingOffer, error)
+	UpdateOfferStatus(ctx context.Context, offerID string, status BookingOfferStatus, reason *string) error
+	CancelPendingOffers(ctx context.Context, bookingID string) error
+
 	// WithTransaction executes a function within a database transaction.
 	WithTransaction(ctx context.Context, fn func(BookingRepository) error) error
 
@@ -40,4 +48,8 @@ type BookingRepository interface {
 
 	// GetDB returns the underlying database connection.
 	GetDB() *gorm.DB
+
+	// CreateEventInOutbox writes an event directly to the outbox table within a transaction.
+	// This ensures events are published atomically with database changes.
+	CreateEventInOutbox(ctx context.Context, event *BookingEvent) error
 }

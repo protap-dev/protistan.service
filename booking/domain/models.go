@@ -6,9 +6,15 @@ import "time"
 type BookingStatus string
 
 const (
-	BookingPendingPayment BookingStatus = "pending_payment"
 	BookingRequested      BookingStatus = "requested"
-	BookingAccepted       BookingStatus = "accepted"
+	BookingOfferPending   BookingStatus = "offer_pending"
+	BookingOfferRejected  BookingStatus = "offer_rejected"
+	BookingAssigned       BookingStatus = "assigned"
+	BookingPendingQuote   BookingStatus = "pending_quote"
+	BookingQuoteProposed  BookingStatus = "quote_proposed"
+	BookingQuoteAccepted  BookingStatus = "quote_accepted"
+	BookingPaymentPending BookingStatus = "payment_pending"
+	BookingConfirmed      BookingStatus = "confirmed"
 	BookingEnroute        BookingStatus = "enroute"
 	BookingInProgress     BookingStatus = "in_progress"
 	BookingCompleted      BookingStatus = "completed"
@@ -18,9 +24,15 @@ const (
 
 // Valid status transitions
 var validTransitions = map[BookingStatus]map[BookingStatus]bool{
-	BookingPendingPayment: {BookingRequested: true},
-	BookingRequested:      {BookingAccepted: true, BookingCancelled: true},
-	BookingAccepted:       {BookingEnroute: true, BookingCancelled: true},
+	BookingRequested:      {BookingOfferPending: true, BookingCancelled: true},
+	BookingOfferPending:   {BookingAssigned: true, BookingOfferRejected: true, BookingCancelled: true},
+	BookingOfferRejected:  {BookingOfferPending: true, BookingCancelled: true},
+	BookingAssigned:       {BookingPendingQuote: true, BookingCancelled: true},
+	BookingPendingQuote:   {BookingQuoteProposed: true, BookingCancelled: true},
+	BookingQuoteProposed:  {BookingQuoteAccepted: true, BookingCancelled: true},
+	BookingQuoteAccepted:  {BookingPaymentPending: true, BookingCancelled: true},
+	BookingPaymentPending: {BookingConfirmed: true, BookingCancelled: true},
+	BookingConfirmed:      {BookingEnroute: true, BookingCancelled: true},
 	BookingEnroute:        {BookingInProgress: true, BookingCancelled: true},
 	BookingInProgress:     {BookingCompleted: true, BookingCancelled: true},
 	BookingCompleted:      {BookingClosed: true},
@@ -41,9 +53,14 @@ type Booking struct {
 	ScheduledAt           *time.Time        `json:"scheduled_at,omitempty"`
 	EstimatedDurationMins int               `json:"estimated_duration_mins,omitempty"`
 	Metadata              map[string]string `json:"metadata,omitempty"`
-	CreatedAt             time.Time         `json:"created_at"`
-	UpdatedAt             time.Time         `json:"updated_at"`
-	Version               int64             `json:"version"` // For optimistic locking
+	
+	// Offer tracking
+	IsSpecificArtisan bool `json:"is_specific_artisan"` // true if customer requested specific artisan
+	OffersCount       int  `json:"offers_count"`        // Total offers made
+	
+	CreatedAt time.Time `json:"created_at"`
+	UpdatedAt time.Time `json:"updated_at"`
+	Version   int64     `json:"version"` // For optimistic locking
 }
 
 // CanTransition checks if a status transition is valid

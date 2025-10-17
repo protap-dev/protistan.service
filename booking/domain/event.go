@@ -23,4 +23,14 @@ type EventPublisher interface {
 	PublishStatusEvent(ctx context.Context, event *BookingEvent)
 	PublishCreatedEvent(ctx context.Context, event *BookingEvent)
 	PublishCancelledEvent(ctx context.Context, event *BookingEvent)
+	
+	// Offer-related events
+	PublishOfferCreatedEvent(ctx context.Context, event *BookingEvent)
+	PublishAssignedEvent(ctx context.Context, event *BookingEvent)
+	PublishOfferRejectedEvent(ctx context.Context, event *BookingEvent)
+
+	// Quote and payment events
+	PublishQuoteAcceptedEvent(ctx context.Context, event *BookingEvent)
+	PublishQuoteRejectedEvent(ctx context.Context, event *BookingEvent)
+	PublishPaymentConfirmedEvent(ctx context.Context, event *BookingEvent)
 }
