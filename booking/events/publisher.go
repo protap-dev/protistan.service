@@ -64,7 +64,7 @@ func (e *eventPublisher) PublishAssignedEvent(ctx context.Context, event *domain
 // PublishOfferRejectedEvent publishes when an artisan rejects a booking offer.
 func (e *eventPublisher) PublishOfferRejectedEvent(ctx context.Context, event *domain.BookingEvent) {
 	envelope := CreateEventEnvelope(ctx, "booking.offer.rejected", *event)
-	_, err := StatusTopic.Publish(ctx, envelope)
+	_, err := OfferRejectedTopic.Publish(ctx, envelope)
 	if err != nil {
 		log.Printf("ERROR: failed to publish offer rejected event: %v", err)
 	}

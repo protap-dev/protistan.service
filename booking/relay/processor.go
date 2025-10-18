@@ -21,17 +21,13 @@ type DefaultProcessor struct{}
 func (p *DefaultProcessor) GetUnprocessedEvents(ctx context.Context, db *gorm.DB, batchSize int) ([]*repository.OutboxEvent, error) {
 	var events []*repository.OutboxEvent
 
-	// Use raw SQL to avoid GORM schema dependency issues
-	// This works regardless of whether processed_at column exists
-	query := `
-		SELECT id, topic, data, inserted_at, processed_at
-		FROM outbox
-		WHERE processed_at IS NULL
-		ORDER BY inserted_at ASC
-		LIMIT ?
-	`
+	err := db.WithContext(ctx).
+		Model(&repository.OutboxEvent{}).
+		Where("processed_at IS NULL").
+		Order("inserted_at ASC").
+		Limit(batchSize).
+		Find(&events).Error
 
-	err := db.WithContext(ctx).Raw(query, batchSize).Scan(&events).Error
 	if err != nil {
 		return nil, err
 	}

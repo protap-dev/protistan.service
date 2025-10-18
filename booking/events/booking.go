@@ -47,6 +47,16 @@ var (
 		DeliveryGuarantee: pubsub.AtLeastOnce,
 	})
 
+	// OfferRejectedTopic publishes offer rejection events wrapped in envelope
+	OfferRejectedTopic = pubsub.NewTopic[*EventEnvelope[domain.BookingEvent]]("booking-offer-rejected", pubsub.TopicConfig{
+		DeliveryGuarantee: pubsub.AtLeastOnce,
+	})
+
+	// OfferExpiredTopic publishes offer expiration events wrapped in envelope
+	OfferExpiredTopic = pubsub.NewTopic[*EventEnvelope[domain.BookingEvent]]("booking-offer-expired", pubsub.TopicConfig{
+		DeliveryGuarantee: pubsub.AtLeastOnce,
+	})
+
 	// RematchTopic publishes rematch request events wrapped in envelope
 	RematchTopic = pubsub.NewTopic[*EventEnvelope[domain.RematchEvent]]("booking-rematch", pubsub.TopicConfig{
 		DeliveryGuarantee: pubsub.AtLeastOnce,

@@ -15,6 +15,7 @@ type BookingEvent struct {
 	UserID         string        `json:"user_id"`
 	ArtisanID      *string       `json:"artisan_id,omitempty"`
 	Reason         *string       `json:"reason,omitempty"`
+	OfferID        *string       `json:"offer_id,omitempty"` // For offer-related events
 }
 
 // RematchEvent represents a rematch request event for a booking.

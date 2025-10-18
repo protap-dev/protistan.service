@@ -7,7 +7,6 @@ import (
 
 	"encore.app/booking/domain"
 	binternal "encore.app/booking/internal"
-	"gorm.io/datatypes"
 	"gorm.io/gorm"
 )
 
@@ -18,7 +17,7 @@ func insertEventInOutbox[T any](db *gorm.DB, ctx context.Context, event T, topic
 		return err
 	}
 
-	dbModel := &outboxEventDBModel{
+	dbModel := &OutboxEvent{
 		ID:          binternal.GenerateUUID(),
 		Topic:       topic,
 		Data:        jsonData,
@@ -42,13 +41,13 @@ func (r *bookingRepository) CreateRematchEventInOutbox(ctx context.Context, even
 
 // Helper functions for outbox functionality
 
-// eventToJSON converts any serializable event to JSON for storage in outbox
-func eventToJSON[T any](event T) (datatypes.JSON, error) {
+// eventToJSON converts any serializable event to JSON bytes for storage in outbox
+func eventToJSON[T any](event T) ([]byte, error) {
 	data, err := json.Marshal(event)
 	if err != nil {
-		return datatypes.JSON("{}"), err
+		return []byte("{}"), err
 	}
-	return datatypes.JSON(data), nil
+	return data, nil
 }
 
 // getTopicForEvent determines the appropriate topic name for a booking event

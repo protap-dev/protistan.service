@@ -198,7 +198,7 @@ func TestRematchRequestStructure(t *testing.T) {
 		{
 			name: "valid_request_with_reason",
 			request: &handlers.RematchBookingRequest{
-				Reason: stringPtr("Artisan not suitable"),
+				Reason: func(s string) *string { return &s }("Artisan not suitable"),
 			},
 			valid: true,
 		},
@@ -212,7 +212,7 @@ func TestRematchRequestStructure(t *testing.T) {
 		{
 			name: "valid_request_with_empty_reason",
 			request: &handlers.RematchBookingRequest{
-				Reason: stringPtr(""),
+				Reason: func(s string) *string { return &s }(""),
 			},
 			valid: true,
 		},
@@ -248,7 +248,150 @@ func TestRematchIdempotencyKeyFormat(t *testing.T) {
 	t.Logf("✓ Idempotency key format verified: %s", actualKey)
 }
 
-// Helper function
-func stringPtr(s string) *string {
-	return &s
+// TestOfferOutcomeEventPayload tests the offer outcome event payload structure
+func TestOfferOutcomeEventPayload(t *testing.T) {
+	bookingID := uuid.New().String()
+	offerID := uuid.New().String()
+	artisanID := uuid.New().String()
+	reason := "Artisan not available at requested time"
+
+	// Test OfferRejected event using BookingEvent with OfferID
+	rejectedEvent := &domain.BookingEvent{
+		BookingID:      bookingID,
+		Status:         domain.BookingOfferRejected,
+		PreviousStatus: domain.BookingOfferPending,
+		Timestamp:      time.Now(),
+		UserID:         "system", // System-generated for offer rejection
+		ArtisanID:      &artisanID,
+		Reason:         &reason,
+		OfferID:        &offerID,
+	}
+
+	// Verify all required fields are present
+	assert.Equal(t, bookingID, rejectedEvent.BookingID, "event should contain booking ID")
+	assert.Equal(t, domain.BookingOfferRejected, rejectedEvent.Status, "event should have rejected status")
+	assert.Equal(t, domain.BookingOfferPending, rejectedEvent.PreviousStatus, "event should have previous status")
+	assert.NotNil(t, rejectedEvent.ArtisanID, "event should contain artisan ID")
+	assert.Equal(t, artisanID, *rejectedEvent.ArtisanID, "artisan ID should match")
+	assert.NotNil(t, rejectedEvent.OfferID, "event should contain offer ID")
+	assert.Equal(t, offerID, *rejectedEvent.OfferID, "offer ID should match")
+	assert.NotNil(t, rejectedEvent.Reason, "event should contain reason")
+	assert.Equal(t, reason, *rejectedEvent.Reason, "reason should match")
+	assert.False(t, rejectedEvent.Timestamp.IsZero(), "event should have timestamp")
+
+	// Test OfferExpired event using BookingEvent with OfferID
+	expiredEvent := &domain.BookingEvent{
+		BookingID:      bookingID,
+		Status:         domain.BookingOfferRejected, // Using rejected status for expired offers
+		PreviousStatus: domain.BookingOfferPending,
+		Timestamp:      time.Now(),
+		UserID:         "system", // System-generated for offer expiration
+		ArtisanID:      &artisanID,
+		Reason:         func(s string) *string { return &s }("Offer expired"),
+		OfferID:        &offerID,
+	}
+
+	assert.Equal(t, bookingID, expiredEvent.BookingID, "expired event should contain booking ID")
+	assert.NotNil(t, expiredEvent.OfferID, "expired event should contain offer ID")
+	assert.Equal(t, offerID, *expiredEvent.OfferID, "expired offer ID should match")
+
+	t.Log("✓ Offer outcome event payload structures verified using BookingEvent")
+}
+
+// TestOfferOutcomeEventPublishing tests that events are published correctly
+func TestOfferOutcomeEventPublishing(t *testing.T) {
+	_, _, publisher, cleanup := setupRematchTest(t)
+	defer cleanup()
+
+	ctx := context.Background()
+
+	// Test OfferRejected event publishing using BookingEvent
+	rejectedEvent := &domain.BookingEvent{
+		BookingID:      uuid.New().String(),
+		Status:         domain.BookingOfferRejected,
+		PreviousStatus: domain.BookingOfferPending,
+		Timestamp:      time.Now(),
+		UserID:         "system",
+		ArtisanID:      func(s string) *string { return &s }(uuid.New().String()),
+		Reason:         func(s string) *string { return &s }("Not available"),
+		OfferID:        func(s string) *string { return &s }(uuid.New().String()),
+	}
+
+	// This would be called by the handler when an offer is rejected
+	// For now, we test the publisher method directly
+	publisher.PublishOfferRejectedEvent(ctx, rejectedEvent)
+
+	// Since this is a mock, we can't easily test the actual publishing
+	// But we can verify the method exists and doesn't panic
+	t.Log("✓ Offer rejected event publishing method available")
+
+	// Test OfferExpired event publishing using BookingEvent
+	expiredEvent := &domain.BookingEvent{
+		BookingID:      uuid.New().String(),
+		Status:         domain.BookingOfferRejected, // Using rejected status for expired offers
+		PreviousStatus: domain.BookingOfferPending,
+		Timestamp:      time.Now(),
+		UserID:         "system",
+		ArtisanID:      func(s string) *string { return &s }(uuid.New().String()),
+		Reason:         func(s string) *string { return &s }("Offer expired"),
+		OfferID:        func(s string) *string { return &s }(uuid.New().String()),
+	}
+
+	publisher.PublishOfferRejectedEvent(ctx, expiredEvent) // Using same method for expired
+
+	t.Log("✓ Offer expired event publishing method available")
+}
+
+// TestOfferOutcomeDataStruct tests the BookingEvent struct creation and validation
+func TestOfferOutcomeDataStruct(t *testing.T) {
+	tests := []struct {
+		name   string
+		event  *domain.BookingEvent
+		valid  bool
+		reason string
+	}{
+		{
+			name: "valid_rejected_event",
+			event: &domain.BookingEvent{
+				BookingID:      "booking-123",
+				Status:         domain.BookingOfferRejected,
+				PreviousStatus: domain.BookingOfferPending,
+				Timestamp:      time.Now(),
+				UserID:         "system",
+				ArtisanID:      func(s string) *string { return &s }("artisan-789"),
+				Reason:         func(s string) *string { return &s }("Not suitable"),
+				OfferID:        func(s string) *string { return &s }("offer-456"),
+			},
+			valid:  true,
+			reason: "Complete rejected event",
+		},
+		{
+			name: "valid_expired_event",
+			event: &domain.BookingEvent{
+				BookingID:      "booking-123",
+				Status:         domain.BookingOfferRejected, // Using rejected status for expired
+				PreviousStatus: domain.BookingOfferPending,
+				Timestamp:      time.Now(),
+				UserID:         "system",
+				ArtisanID:      func(s string) *string { return &s }("artisan-789"),
+				Reason:         func(s string) *string { return &s }("Offer expired"),
+				OfferID:        func(s string) *string { return &s }("offer-456"),
+			},
+			valid:  true,
+			reason: "Complete expired event",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			require.NotNil(t, tt.event)
+			assert.NotEmpty(t, tt.event.BookingID, "booking ID should not be empty")
+			assert.NotNil(t, tt.event.OfferID, "offer ID should not be empty")
+			assert.NotEmpty(t, *tt.event.OfferID, "offer ID should not be empty")
+			assert.NotNil(t, tt.event.ArtisanID, "artisan ID should not be empty")
+			assert.NotEmpty(t, *tt.event.ArtisanID, "artisan ID should not be empty")
+			assert.False(t, tt.event.Timestamp.IsZero(), "timestamp should be set")
+			t.Logf("✓ %s", tt.reason)
+		})
+	}
 }

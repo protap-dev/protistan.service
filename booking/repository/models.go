@@ -68,26 +68,13 @@ func (offerDBModel) TableName() string {
 	return "booking_offers"
 }
 
-// outboxEventDBModel represents events stored in the outbox table
-type outboxEventDBModel struct {
-	ID         string         `gorm:"column:id;primaryKey"`
-	Topic      string         `gorm:"column:topic;not null"`
-	Data       datatypes.JSON `gorm:"column:data;type:jsonb;not null"`
-	InsertedAt time.Time      `gorm:"column:inserted_at;not null;default:now()"`
-	ProcessedAt *time.Time    `gorm:"column:processed_at"` // Production-ready: track when event was processed
-}
-
-func (outboxEventDBModel) TableName() string {
-	return "outbox"
-}
-
-// OutboxEvent represents an event stored in the outbox table (for relay operations)
+// OutboxEvent represents an event stored in the outbox table for guaranteed event publishing
 type OutboxEvent struct {
 	ID          string     `gorm:"column:id;primaryKey"`
 	Topic       string     `gorm:"column:topic;not null"`
 	Data        []byte     `gorm:"column:data;type:jsonb;not null"`
 	InsertedAt  time.Time  `gorm:"column:inserted_at;not null;default:now()"`
-	ProcessedAt *time.Time `gorm:"column:processed_at"` // Production-ready: track when event was processed
+	ProcessedAt *time.Time `gorm:"column:processed_at"` // track when event was processed
 }
 
 // TableName returns the table name for the OutboxEvent model
