@@ -96,3 +96,12 @@ func (e *eventPublisher) PublishPaymentConfirmedEvent(ctx context.Context, event
 		log.Printf("ERROR: failed to publish payment confirmed event: %v", err)
 	}
 }
+
+// PublishRematchRequestedEvent publishes when a customer requests a rematch.
+func (e *eventPublisher) PublishRematchRequestedEvent(ctx context.Context, event *domain.RematchEvent) {
+	envelope := CreateEventEnvelope(ctx, "booking.v1.rematch.requested", *event)
+	_, err := RematchTopic.Publish(ctx, envelope)
+	if err != nil {
+		log.Printf("ERROR: failed to publish rematch requested event: %v", err)
+	}
+}

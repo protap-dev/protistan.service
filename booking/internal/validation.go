@@ -4,10 +4,13 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"time"
 
 	"encore.app/booking/domain"
+	"encore.app/core/cache"
 	"encore.app/customers"
 	"encore.app/user"
+	"encore.dev/beta/errs"
 	"encore.dev/types/uuid"
 )
 
@@ -90,5 +93,45 @@ func ValidateServiceCategoryExists(ctx context.Context, serviceCategoryID string
 	if serviceCategoryID == "" {
 		return errors.New("service_category_id is required")
 	}
+	return nil
+}
+
+// ValidateIdempotency checks If-Match header against current booking version for idempotency
+func ValidateIdempotency(ctx context.Context, bookingID string, expectedVersion int64, cacheManager cache.CacheManager) error {
+	idempotencyKey := fmt.Sprintf("rematch:%s:%d", bookingID, expectedVersion)
+
+	_, exists := cacheManager.Get(ctx, idempotencyKey)
+	if exists {
+		return nil
+	}
+
+	processingMarker := map[string]any{
+		"status":           "processing",
+		"started_at":       time.Now(),
+		"booking_id":       bookingID,
+		"expected_version": expectedVersion,
+	}
+
+	return cacheManager.Set(ctx, idempotencyKey, processingMarker, 2*time.Minute)
+}
+
+// validateRematchEligibility checks if a booking is in a state where rematch is allowed
+func ValidateRematchEligibility(ctx context.Context, status domain.BookingStatus) error {
+	eligibleStates := map[domain.BookingStatus]bool{
+		domain.BookingOfferPending:  true,
+		domain.BookingOfferRejected: true,
+		domain.BookingAssigned:      true,
+		domain.BookingPendingQuote:  true,
+		domain.BookingQuoteRejected: true,
+	}
+
+	if !eligibleStates[status] {
+		return errs.B().Code(errs.InvalidArgument).
+			Msg("booking is not in a state where rematch is allowed").
+			Meta("current_status", string(status)).
+			Meta("allowed_states", "offer_pending, offer_rejected, assigned, pending_quote, quote_rejected").
+			Err()
+	}
+
 	return nil
 }

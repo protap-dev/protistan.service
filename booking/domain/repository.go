@@ -52,4 +52,8 @@ type BookingRepository interface {
 	// CreateEventInOutbox writes an event directly to the outbox table within a transaction.
 	// This ensures events are published atomically with database changes.
 	CreateEventInOutbox(ctx context.Context, event *BookingEvent) error
+
+	// CreateRematchEventInOutbox writes a rematch event directly to the outbox table within a transaction.
+	// This ensures rematch events are published atomically.
+	CreateRematchEventInOutbox(ctx context.Context, event *RematchEvent) error
 }

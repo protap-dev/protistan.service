@@ -23,6 +23,10 @@ type UpdateStatusRequest struct {
 	Reason *string `json:"reason,omitempty"`
 }
 
+type RematchBookingRequest struct {
+	Reason *string `json:"reason,omitempty"` // Optional reason for rematch request
+}
+
 type CancelBookingRequest struct {
 	Reason *string `json:"reason,omitempty"`
 }

@@ -358,6 +358,60 @@ func (h *BookingsHandler) CancelBooking(ctx context.Context, id string, req *Can
 	return h.toResponse(updatedBooking), nil
 }
 
+// RematchBooking handles customer requests for rematching their booking with a different artisan
+func (h *BookingsHandler) RematchBooking(ctx context.Context, id string, req *RematchBookingRequest) (*BookingResponse, error) {
+	userCtx, err := h.authHelper.ExtractUserContext(ctx, "rematch_booking")
+	if err != nil {
+		return nil, err
+	}
+
+	// Get current booking for validation and authorization
+	current, err := h.repo.GetByID(ctx, id)
+	if err != nil {
+		if errors.Is(err, domain.ErrBookingNotFound) {
+			return nil, binternal.ErrNotFound
+		}
+		return nil, binternal.ErrDatabaseError
+	}
+
+	// Authorize that the user is the customer who owns this booking
+	if current.CustomerID != userCtx.ID {
+		return nil, binternal.ErrPermissionDenied
+	}
+
+	// Validate booking is in a rematch-eligible state
+	if err := binternal.ValidateRematchEligibility(ctx, current.Status); err != nil {
+		return nil, err
+	}
+
+	// Check idempotency using If-Match header (booking version)
+	if err := binternal.ValidateIdempotency(ctx, id, current.Version, h.cache); err != nil {
+		return nil, err
+	}
+
+	// Create rematch event
+	rematchEvent := &domain.RematchEvent{
+		BookingID:         id,
+		PreviousArtisanID: current.ArtisanID,
+		CurrentStatus:     current.Status,
+		Reason:            req.Reason,
+		Timestamp:         time.Now(),
+		UserID:            userCtx.ID,
+	}
+
+	// Publish rematch requested event (wrapped in envelope via outbox)
+	if err := h.repo.CreateRematchEventInOutbox(ctx, rematchEvent); err != nil {
+		h.logger.Error(ctx, "failed to publish rematch requested event", err, map[string]interface{}{
+			"booking_id": id,
+			"user_id":    userCtx.ID,
+		})
+		// Don't fail the request if event publishing fails - the rematch was requested successfully
+	}
+
+	// Return current booking state (no state change as per Option A)
+	return h.toResponse(current), nil
+}
+
 // UpdateBookingStatusInternal is a helper method that centralizes common status update logic
 func (h *BookingsHandler) UpdateBookingStatusInternal(ctx context.Context, bookingID string, newStatus domain.BookingStatus, userID string, reason *string, current *domain.Booking) error {
 	var previousStatus domain.BookingStatus

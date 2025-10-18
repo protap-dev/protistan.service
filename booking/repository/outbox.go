@@ -8,11 +8,11 @@ import (
 	"encore.app/booking/domain"
 	binternal "encore.app/booking/internal"
 	"gorm.io/datatypes"
+	"gorm.io/gorm"
 )
 
-// CreateEventInOutbox writes an event directly to the outbox table within a transaction.
-// This ensures events are published atomically with database changes.
-func (r *bookingRepository) CreateEventInOutbox(ctx context.Context, event *domain.BookingEvent) error {
+// insertEventInOutbox is a generic function for inserting events into the outbox table
+func insertEventInOutbox[T any](db *gorm.DB, ctx context.Context, event T, topic string) error {
 	jsonData, err := eventToJSON(event)
 	if err != nil {
 		return err
@@ -20,15 +20,36 @@ func (r *bookingRepository) CreateEventInOutbox(ctx context.Context, event *doma
 
 	dbModel := &outboxEventDBModel{
 		ID:          binternal.GenerateUUID(),
-		Topic:       getTopicForEvent(event),
+		Topic:       topic,
 		Data:        jsonData,
 		InsertedAt:  time.Now(),
 		ProcessedAt: nil, // initially nil, set when processed
 	}
-	return r.db.WithContext(ctx).Create(dbModel).Error
+	return db.WithContext(ctx).Create(dbModel).Error
+}
+
+// CreateEventInOutbox writes a booking event directly to the outbox table within a transaction.
+// This ensures events are published atomically with database changes.
+func (r *bookingRepository) CreateEventInOutbox(ctx context.Context, event *domain.BookingEvent) error {
+	return insertEventInOutbox(r.db, ctx, event, getTopicForEvent(event))
+}
+
+// CreateRematchEventInOutbox writes a rematch event directly to the outbox table within a transaction.
+// This ensures rematch events are published atomically.
+func (r *bookingRepository) CreateRematchEventInOutbox(ctx context.Context, event *domain.RematchEvent) error {
+	return insertEventInOutbox(r.db, ctx, event, "booking-rematch")
 }
 
 // Helper functions for outbox functionality
+
+// eventToJSON converts any serializable event to JSON for storage in outbox
+func eventToJSON[T any](event T) (datatypes.JSON, error) {
+	data, err := json.Marshal(event)
+	if err != nil {
+		return datatypes.JSON("{}"), err
+	}
+	return datatypes.JSON(data), nil
+}
 
 // getTopicForEvent determines the appropriate topic name for a booking event
 func getTopicForEvent(event *domain.BookingEvent) string {
@@ -47,6 +68,8 @@ func getTopicForEvent(event *domain.BookingEvent) string {
 		return "booking.status"
 	case domain.BookingQuoteAccepted:
 		return "booking.quote.accepted"
+	case domain.BookingQuoteRejected:
+		return "booking.quote.rejected"
 	case domain.BookingPaymentPending:
 		return "booking.status"
 	case domain.BookingConfirmed:
@@ -64,13 +87,4 @@ func getTopicForEvent(event *domain.BookingEvent) string {
 	default:
 		return "booking.status"
 	}
-}
-
-// eventToJSON converts a booking event to JSON for storage in outbox
-func eventToJSON(event *domain.BookingEvent) (datatypes.JSON, error) {
-	data, err := json.Marshal(event)
-	if err != nil {
-		return datatypes.JSON("{}"), err
-	}
-	return datatypes.JSON(data), nil
 }

@@ -13,6 +13,7 @@ const (
 	BookingPendingQuote   BookingStatus = "pending_quote"
 	BookingQuoteProposed  BookingStatus = "quote_proposed"
 	BookingQuoteAccepted  BookingStatus = "quote_accepted"
+	BookingQuoteRejected  BookingStatus = "quote_rejected"
 	BookingPaymentPending BookingStatus = "payment_pending"
 	BookingConfirmed      BookingStatus = "confirmed"
 	BookingEnroute        BookingStatus = "enroute"

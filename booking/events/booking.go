@@ -46,4 +46,9 @@ var (
 	PaymentConfirmedTopic = pubsub.NewTopic[*EventEnvelope[domain.BookingEvent]]("booking-payment-confirmed", pubsub.TopicConfig{
 		DeliveryGuarantee: pubsub.AtLeastOnce,
 	})
+
+	// RematchTopic publishes rematch request events wrapped in envelope
+	RematchTopic = pubsub.NewTopic[*EventEnvelope[domain.RematchEvent]]("booking-rematch", pubsub.TopicConfig{
+		DeliveryGuarantee: pubsub.AtLeastOnce,
+	})
 )

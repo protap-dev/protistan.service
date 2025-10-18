@@ -88,6 +88,11 @@ func (s *Service) ListBookings(ctx context.Context, params *handlers.ListBooking
 	return s.bookingsHandler.ListBookings(ctx, params)
 }
 
+//encore:api auth method=POST path=/v0/bookings/:id/rematch
+func (s *Service) RematchBooking(ctx context.Context, id string, req *handlers.RematchBookingRequest) (*handlers.BookingResponse, error) {
+	return s.bookingsHandler.RematchBooking(ctx, id, req)
+}
+
 //encore:api auth method=POST path=/v0/bookings/:id/cancel
 func (s *Service) CancelBooking(ctx context.Context, id string, req *handlers.CancelBookingRequest) (*handlers.BookingResponse, error) {
 	return s.bookingsHandler.CancelBooking(ctx, id, req)

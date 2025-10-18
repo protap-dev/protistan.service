@@ -17,6 +17,17 @@ type BookingEvent struct {
 	Reason         *string       `json:"reason,omitempty"`
 }
 
+// RematchEvent represents a rematch request event for a booking.
+// It is used when a customer wants to request a different artisan for their booking.
+type RematchEvent struct {
+	BookingID         string    `json:"booking_id"`
+	PreviousArtisanID *string   `json:"previous_artisan_id,omitempty"` // Current artisan being replaced
+	CurrentStatus     BookingStatus `json:"current_status"`            // Current booking status
+	Reason            *string   `json:"reason,omitempty"`           // Optional reason for rematch
+	Timestamp         time.Time `json:"timestamp"`
+	UserID            string    `json:"user_id"`                    // Customer requesting rematch
+}
+
 // EventPublisher defines the interface for publishing booking-related events.
 // By defining this in the domain, we decouple the application core from the pub/sub implementation
 type EventPublisher interface {
@@ -33,4 +44,7 @@ type EventPublisher interface {
 	PublishQuoteAcceptedEvent(ctx context.Context, event *BookingEvent)
 	PublishQuoteRejectedEvent(ctx context.Context, event *BookingEvent)
 	PublishPaymentConfirmedEvent(ctx context.Context, event *BookingEvent)
+
+	// Rematch events
+	PublishRematchRequestedEvent(ctx context.Context, event *RematchEvent)
 }
