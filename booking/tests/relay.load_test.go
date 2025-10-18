@@ -12,11 +12,21 @@ import (
 	"encore.app/booking/events"
 	"encore.dev/et"
 	"encore.dev/pubsub"
+	"encore.dev/storage/sqldb"
 	"github.com/google/uuid"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"x.encore.dev/infra/pubsub/outbox"
 )
+
+// Helper function to create and wrap event in envelope
+func publishEventToOutbox(ctx context.Context, tx *sqldb.Tx, event domain.BookingEvent, eventType string) (string, error) {
+	topicRef := pubsub.TopicRef[pubsub.Publisher[*events.EventEnvelope[domain.BookingEvent]]](events.StatusTopic)
+	outboxRef := outbox.Bind(topicRef, outbox.TxPersister(tx))
+
+	envelope := events.CreateEventEnvelope(ctx, eventType, event)
+	return outboxRef.Publish(ctx, envelope)
+}
 
 // TestOutboxAtomicCommit verifies transactional guarantees with isolated database
 func TestOutboxAtomicCommit(t *testing.T) {
@@ -38,44 +48,32 @@ func TestOutboxAtomicCommit(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			ctx := context.Background()
 
-			// Create isolated test database for this test
 			testDB, err := et.NewTestDatabase(ctx, "booking")
-			require.NoError(t, err, "failed to create test database")
-
-			// Get initial outbox count
-			var initialCount int
-			err = testDB.QueryRow(ctx,
-				"SELECT COUNT(*) FROM outbox").Scan(&initialCount)
 			require.NoError(t, err)
 
-			// Start transaction
+			var initialCount int
+			err = testDB.QueryRow(ctx, "SELECT COUNT(*) FROM outbox").Scan(&initialCount)
+			require.NoError(t, err)
+
 			tx, err := testDB.Begin(ctx)
 			require.NoError(t, err)
 
-			// Bind topic to outbox
-			topicRef := pubsub.TopicRef[pubsub.Publisher[*domain.BookingEvent]](events.StatusTopic)
-			outboxRef := outbox.Bind(topicRef, outbox.TxPersister(tx))
-
-			// Publish test event
-			event := &domain.BookingEvent{
+			event := domain.BookingEvent{
 				BookingID: uuid.New().String(),
 				Status:    domain.BookingRequested,
 				Timestamp: time.Now(),
 			}
 
-			msgID, err := outboxRef.Publish(ctx, event)
-			require.NoError(t, err, "failed to publish event")
-			require.NotEmpty(t, msgID, "message ID should not be empty")
+			msgID, err := publishEventToOutbox(ctx, tx, event, "booking.created")
+			require.NoError(t, err)
+			require.NotEmpty(t, msgID)
 
-			// Commit or rollback
 			if tt.shouldCommit {
 				err = tx.Commit()
 				require.NoError(t, err)
 
-				// Verify message was added to outbox
 				var finalCount int
-				err = testDB.QueryRow(ctx,
-					"SELECT COUNT(*) FROM outbox").Scan(&finalCount)
+				err = testDB.QueryRow(ctx, "SELECT COUNT(*) FROM outbox").Scan(&finalCount)
 				require.NoError(t, err)
 
 				assert.Greater(t, finalCount, initialCount,
@@ -86,10 +84,8 @@ func TestOutboxAtomicCommit(t *testing.T) {
 				err = tx.Rollback()
 				require.NoError(t, err)
 
-				// Verify message was NOT added
 				var finalCount int
-				err = testDB.QueryRow(ctx,
-					"SELECT COUNT(*) FROM outbox").Scan(&finalCount)
+				err = testDB.QueryRow(ctx, "SELECT COUNT(*) FROM outbox").Scan(&finalCount)
 				require.NoError(t, err)
 
 				assert.Equal(t, initialCount, finalCount,
@@ -100,25 +96,21 @@ func TestOutboxAtomicCommit(t *testing.T) {
 	}
 }
 
-// TestOutboxPublishAndBind tests basic publish functionality with isolated database
+// TestOutboxPublishAndBind tests basic publish functionality
 func TestOutboxPublishAndBind(t *testing.T) {
 	ctx := context.Background()
 
-	// Create isolated test database
 	testDB, err := et.NewTestDatabase(ctx, "booking")
 	require.NoError(t, err)
 
-	// Start transaction
 	tx, err := testDB.Begin(ctx)
 	require.NoError(t, err)
-	defer tx.Rollback() // Cleanup
+	defer tx.Rollback()
 
-	// Bind topic to outbox
-	topicRef := pubsub.TopicRef[pubsub.Publisher[*domain.BookingEvent]](events.StatusTopic)
+	topicRef := pubsub.TopicRef[pubsub.Publisher[*events.EventEnvelope[domain.BookingEvent]]](events.StatusTopic)
 	outboxRef := outbox.Bind(topicRef, outbox.TxPersister(tx))
 
-	// Publish multiple events
-	testEvents := []*domain.BookingEvent{
+	testEvents := []domain.BookingEvent{
 		{
 			BookingID: uuid.New().String(),
 			Status:    domain.BookingRequested,
@@ -137,13 +129,13 @@ func TestOutboxPublishAndBind(t *testing.T) {
 	}
 
 	for i, event := range testEvents {
-		msgID, err := outboxRef.Publish(ctx, event)
+		envelope := events.CreateEventEnvelope(ctx, events.GetBookingEventType(event.Status), event)
+		msgID, err := outboxRef.Publish(ctx, envelope)
 		require.NoError(t, err, "failed to publish event %d", i)
-		require.NotEmpty(t, msgID, "message ID should not be empty")
+		require.NotEmpty(t, msgID)
 		t.Logf("✓ Published event %d with ID: %s", i+1, msgID)
 	}
 
-	// Commit transaction
 	err = tx.Commit()
 	require.NoError(t, err)
 
@@ -154,18 +146,15 @@ func TestOutboxPublishAndBind(t *testing.T) {
 func TestRelayRegistration(t *testing.T) {
 	ctx := context.Background()
 
-	// Create isolated test database
 	testDB, err := et.NewTestDatabase(ctx, "booking")
 	require.NoError(t, err)
 
-	// Create relay with isolated database
 	relay := outbox.NewRelay(outbox.SQLDBStore(testDB))
-	require.NotNil(t, relay, "relay should be created")
+	require.NotNil(t, relay)
 
-	// Register multiple topics
-	statusTopicRef := pubsub.TopicRef[pubsub.Publisher[*domain.BookingEvent]](events.StatusTopic)
-	createdTopicRef := pubsub.TopicRef[pubsub.Publisher[*domain.BookingEvent]](events.CreatedTopic)
-	cancelledTopicRef := pubsub.TopicRef[pubsub.Publisher[*domain.BookingEvent]](events.CancelledTopic)
+	statusTopicRef := pubsub.TopicRef[pubsub.Publisher[*events.EventEnvelope[domain.BookingEvent]]](events.StatusTopic)
+	createdTopicRef := pubsub.TopicRef[pubsub.Publisher[*events.EventEnvelope[domain.BookingEvent]]](events.CreatedTopic)
+	cancelledTopicRef := pubsub.TopicRef[pubsub.Publisher[*events.EventEnvelope[domain.BookingEvent]]](events.CancelledTopic)
 
 	outbox.RegisterTopic(relay, statusTopicRef)
 	outbox.RegisterTopic(relay, createdTopicRef)
@@ -178,39 +167,36 @@ func TestRelayRegistration(t *testing.T) {
 func TestRelayProcessMessages(t *testing.T) {
 	ctx := context.Background()
 
-	// Create isolated test database
 	testDB, err := et.NewTestDatabase(ctx, "booking")
 	require.NoError(t, err)
 
-	// Publish test messages
 	tx, err := testDB.Begin(ctx)
 	require.NoError(t, err)
 
-	topicRef := pubsub.TopicRef[pubsub.Publisher[*domain.BookingEvent]](events.StatusTopic)
+	topicRef := pubsub.TopicRef[pubsub.Publisher[*events.EventEnvelope[domain.BookingEvent]]](events.StatusTopic)
 	outboxRef := outbox.Bind(topicRef, outbox.TxPersister(tx))
 
 	messageCount := 10
 	for i := 0; i < messageCount; i++ {
-		event := &domain.BookingEvent{
+		event := domain.BookingEvent{
 			BookingID: uuid.New().String(),
 			Status:    domain.BookingRequested,
 			Timestamp: time.Now(),
 		}
-		_, err := outboxRef.Publish(ctx, event)
+		envelope := events.CreateEventEnvelope(ctx, "booking.created", event)
+		_, err := outboxRef.Publish(ctx, envelope)
 		require.NoError(t, err)
 	}
 
 	require.NoError(t, tx.Commit())
 	t.Logf("✓ Published %d messages to outbox", messageCount)
 
-	// Setup relay and process messages
 	relay := outbox.NewRelay(outbox.SQLDBStore(testDB))
 	outbox.RegisterTopic(relay, topicRef)
 
-	// Process messages synchronously
 	successes, errors, storeErr := relay.ProcessMessages(ctx, messageCount)
 
-	require.NoError(t, storeErr, "should not have store errors")
+	require.NoError(t, storeErr)
 	t.Logf("✓ Processed messages: %d successes, %d errors", successes, errors)
 
 	assert.Greater(t, successes, 0, "should have processed some messages")
@@ -228,17 +214,18 @@ func TestRelayPollForMessages(t *testing.T) {
 	tx, err := testDB.Begin(ctx)
 	require.NoError(t, err)
 
-	topicRef := pubsub.TopicRef[pubsub.Publisher[*domain.BookingEvent]](events.StatusTopic)
+	topicRef := pubsub.TopicRef[pubsub.Publisher[*events.EventEnvelope[domain.BookingEvent]]](events.StatusTopic)
 	outboxRef := outbox.Bind(topicRef, outbox.TxPersister(tx))
 
 	messageCount := 5
-	for i := 0; i < messageCount; i++ {
-		event := &domain.BookingEvent{
+	for range messageCount {
+		event := domain.BookingEvent{
 			BookingID: uuid.New().String(),
 			Status:    domain.BookingRequested,
 			Timestamp: time.Now(),
 		}
-		_, err := outboxRef.Publish(ctx, event)
+		envelope := events.CreateEventEnvelope(ctx, "booking.created", event)
+		_, err := outboxRef.Publish(ctx, envelope)
 		require.NoError(t, err)
 	}
 
@@ -288,16 +275,17 @@ func TestRelayLoadPerformance(t *testing.T) {
 	tx, err := testDB.Begin(ctx)
 	require.NoError(t, err)
 
-	topicRef := pubsub.TopicRef[pubsub.Publisher[*domain.BookingEvent]](events.StatusTopic)
+	topicRef := pubsub.TopicRef[pubsub.Publisher[*events.EventEnvelope[domain.BookingEvent]]](events.StatusTopic)
 	outboxRef := outbox.Bind(topicRef, outbox.TxPersister(tx))
 
-	for i := 0; i < messageCount; i++ {
-		event := &domain.BookingEvent{
+	for range messageCount {
+		event := domain.BookingEvent{
 			BookingID: uuid.New().String(),
 			Status:    domain.BookingRequested,
 			Timestamp: time.Now(),
 		}
-		_, err := outboxRef.Publish(ctx, event)
+		envelope := events.CreateEventEnvelope(ctx, "booking.created", event)
+		_, err := outboxRef.Publish(ctx, envelope)
 		require.NoError(t, err)
 	}
 
@@ -326,11 +314,10 @@ func TestRelayLoadPerformance(t *testing.T) {
 	assert.Greater(t, successes, 0, "should process at least some messages")
 }
 
-// TestConcurrentPublishToOutbox - RACE-SAFE VERSION
+// TestConcurrentPublishToOutbox - CORRECTED
 func TestConcurrentPublishToOutbox(t *testing.T) {
 	ctx := context.Background()
 
-	// Create isolated test database
 	testDB, err := et.NewTestDatabase(ctx, "booking")
 	require.NoError(t, err)
 
@@ -340,11 +327,10 @@ func TestConcurrentPublishToOutbox(t *testing.T) {
 	var wg sync.WaitGroup
 	wg.Add(goroutineCount)
 
-	// Use atomic counters for thread-safe access
 	var successCount atomic.Int32
 	var errorCount atomic.Int32
 
-	topicRef := pubsub.TopicRef[pubsub.Publisher[*domain.BookingEvent]](events.StatusTopic)
+	topicRef := pubsub.TopicRef[pubsub.Publisher[*events.EventEnvelope[domain.BookingEvent]]](events.StatusTopic)
 
 	for i := 0; i < goroutineCount; i++ {
 		go func(goroutineID int) {
@@ -358,13 +344,14 @@ func TestConcurrentPublishToOutbox(t *testing.T) {
 				}
 
 				outboxRef := outbox.Bind(topicRef, outbox.TxPersister(tx))
-				event := &domain.BookingEvent{
+				event := domain.BookingEvent{
 					BookingID: uuid.New().String(),
 					Status:    domain.BookingRequested,
 					Timestamp: time.Now(),
 				}
 
-				_, err = outboxRef.Publish(ctx, event)
+				envelope := events.CreateEventEnvelope(ctx, "booking.created", event)
+				_, err = outboxRef.Publish(ctx, envelope)
 				if err != nil {
 					tx.Rollback()
 					errorCount.Add(1)
@@ -389,8 +376,7 @@ func TestConcurrentPublishToOutbox(t *testing.T) {
 	t.Logf("✓ Concurrent publish: %d successes, %d errors (expected %d total)",
 		successes, errors, totalExpected)
 
-	assert.Greater(t, successes, int32(0),
-		"should have at least some successful publishes")
+	assert.Greater(t, successes, int32(0))
 }
 
 // TestOutboxMultipleTopics tests publishing to different topics
@@ -406,28 +392,30 @@ func TestOutboxMultipleTopics(t *testing.T) {
 	defer tx.Rollback()
 
 	// Bind and publish to StatusTopic
-	statusTopicRef := pubsub.TopicRef[pubsub.Publisher[*domain.BookingEvent]](events.StatusTopic)
+	statusTopicRef := pubsub.TopicRef[pubsub.Publisher[*events.EventEnvelope[domain.BookingEvent]]](events.StatusTopic)
 	statusOutbox := outbox.Bind(statusTopicRef, outbox.TxPersister(tx))
 
-	statusEvent := &domain.BookingEvent{
+	statusEvent := domain.BookingEvent{
 		BookingID: uuid.New().String(),
 		Status:    domain.BookingRequested,
 		Timestamp: time.Now(),
 	}
-	statusMsgID, err := statusOutbox.Publish(ctx, statusEvent)
+	statusEnvelope := events.CreateEventEnvelope(ctx, "booking.created", statusEvent)
+	statusMsgID, err := statusOutbox.Publish(ctx, statusEnvelope)
 	require.NoError(t, err)
 	require.NotEmpty(t, statusMsgID)
 
 	// Bind and publish to CreatedTopic
-	createdTopicRef := pubsub.TopicRef[pubsub.Publisher[*domain.BookingEvent]](events.CreatedTopic)
+	createdTopicRef := pubsub.TopicRef[pubsub.Publisher[*events.EventEnvelope[domain.BookingEvent]]](events.CreatedTopic)
 	createdOutbox := outbox.Bind(createdTopicRef, outbox.TxPersister(tx))
 
-	createdEvent := &domain.BookingEvent{
+	createdEvent := domain.BookingEvent{
 		BookingID: uuid.New().String(),
 		Status:    domain.BookingRequested,
 		Timestamp: time.Now(),
 	}
-	createdMsgID, err := createdOutbox.Publish(ctx, createdEvent)
+	createdEnvelope := events.CreateEventEnvelope(ctx, "booking.created", createdEvent)
+	createdMsgID, err := createdOutbox.Publish(ctx, createdEnvelope)
 	require.NoError(t, err)
 	require.NotEmpty(t, createdMsgID)
 
@@ -448,18 +436,19 @@ func TestRelayRetryOnFailure(t *testing.T) {
 	tx, err := testDB.Begin(ctx)
 	require.NoError(t, err)
 
-	topicRef := pubsub.TopicRef[pubsub.Publisher[*domain.BookingEvent]](events.StatusTopic)
+	topicRef := pubsub.TopicRef[pubsub.Publisher[*events.EventEnvelope[domain.BookingEvent]]](events.StatusTopic)
 	outboxRef := outbox.Bind(topicRef, outbox.TxPersister(tx))
 
 	messageCount := 5
 
 	for i := 0; i < messageCount; i++ {
-		event := &domain.BookingEvent{
+		event := domain.BookingEvent{
 			BookingID: uuid.New().String(),
 			Status:    domain.BookingRequested,
 			Timestamp: time.Now(),
 		}
-		_, err := outboxRef.Publish(ctx, event)
+		envelope := events.CreateEventEnvelope(ctx, "booking.created", event)
+		_, err := outboxRef.Publish(ctx, envelope)
 		require.NoError(t, err)
 	}
 
@@ -497,13 +486,14 @@ func TestRelayRetryOnFailure(t *testing.T) {
 	outboxRef2 := outbox.Bind(topicRef, outbox.TxPersister(tx2))
 	retryCount := 3
 
-	for i := 0; i < retryCount; i++ {
-		event := &domain.BookingEvent{
+	for range retryCount {
+		event := domain.BookingEvent{
 			BookingID: uuid.New().String(),
 			Status:    domain.BookingRequested,
 			Timestamp: time.Now(),
 		}
-		_, err := outboxRef2.Publish(ctx, event)
+		envelope := events.CreateEventEnvelope(ctx, "booking.created", event)
+		_, err := outboxRef2.Publish(ctx, envelope)
 		require.NoError(t, err)
 	}
 
@@ -540,7 +530,7 @@ func TestRelayMessageOrdering(t *testing.T) {
 	// to ensure clear ordering
 	messageCount := 20
 
-	topicRef := pubsub.TopicRef[pubsub.Publisher[*domain.BookingEvent]](events.StatusTopic)
+	topicRef := pubsub.TopicRef[pubsub.Publisher[*events.EventEnvelope[domain.BookingEvent]]](events.StatusTopic)
 
 	for i := range messageCount {
 		tx, err := testDB.Begin(ctx)
@@ -549,12 +539,13 @@ func TestRelayMessageOrdering(t *testing.T) {
 		bookingID := fmt.Sprintf("booking-%03d", i)
 
 		outboxRef := outbox.Bind(topicRef, outbox.TxPersister(tx))
-		event := &domain.BookingEvent{
+		event := domain.BookingEvent{
 			BookingID: bookingID,
 			Status:    domain.BookingRequested,
 			Timestamp: time.Now(),
 		}
-		_, err = outboxRef.Publish(ctx, event)
+		envelope := events.CreateEventEnvelope(ctx, "booking.created", event)
+		_, err = outboxRef.Publish(ctx, envelope)
 		require.NoError(t, err)
 
 		require.NoError(t, tx.Commit())
@@ -632,17 +623,18 @@ func TestOutboxCleanup(t *testing.T) {
 	tx, err := testDB.Begin(ctx)
 	require.NoError(t, err)
 
-	topicRef := pubsub.TopicRef[pubsub.Publisher[*domain.BookingEvent]](events.StatusTopic)
+	topicRef := pubsub.TopicRef[pubsub.Publisher[*events.EventEnvelope[domain.BookingEvent]]](events.StatusTopic)
 	outboxRef := outbox.Bind(topicRef, outbox.TxPersister(tx))
 
 	messageCount := 10
-	for i := 0; i < messageCount; i++ {
-		event := &domain.BookingEvent{
+	for range messageCount {
+		event := domain.BookingEvent{
 			BookingID: uuid.New().String(),
 			Status:    domain.BookingRequested,
 			Timestamp: time.Now(),
 		}
-		_, err := outboxRef.Publish(ctx, event)
+		envelope := events.CreateEventEnvelope(ctx, "booking.created", event)
+		_, err := outboxRef.Publish(ctx, envelope)
 		require.NoError(t, err)
 	}
 

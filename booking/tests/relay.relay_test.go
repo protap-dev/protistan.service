@@ -1,4 +1,4 @@
-package relay
+package booking
 
 import (
 	"context"
@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"encore.app/booking/domain"
+	"encore.app/booking/relay"
 	"encore.app/booking/repository"
 )
 
@@ -15,30 +16,30 @@ func TestRelayInitialization(t *testing.T) {
 	// without errors, ensuring the dependency injection works correctly
 
 	// Test configuration creation
-	config := DefaultConfig()
+	config := relay.DefaultConfig()
 	if config.PollingInterval == 0 {
 		t.Error("DefaultConfig should set PollingInterval")
 	}
 
 	// Test metrics creation
-	metrics := NewMetrics()
+	metrics := relay.NewMetrics()
 	if metrics == nil {
 		t.Error("NewMetrics should return a valid metrics instance")
 	}
 
 	// Test component creation
-	publisher := &DefaultPublisher{}
-	processor := &DefaultProcessor{}
-	cleanup := &DefaultCleanup{}
+	publisher := &relay.DefaultPublisher{}
+	processor := &relay.DefaultProcessor{}
+	cleanup := &relay.DefaultCleanup{}
 
 	if publisher == nil || processor == nil || cleanup == nil {
 		t.Error("Component creation should succeed")
 	}
 
 	// Test that our interfaces are properly implemented
-	var _ Publisher = publisher
-	var _ Processor = processor
-	var _ Cleanup = cleanup
+	var _ relay.Publisher = publisher
+	var _ relay.Processor = processor
+	var _ relay.Cleanup = cleanup
 
 	// Test metrics snapshot
 	snapshot := metrics.GetSnapshot()
@@ -51,7 +52,7 @@ func TestRelayInitialization(t *testing.T) {
 
 // TestConfigValidation verifies configuration values are reasonable
 func TestConfigValidation(t *testing.T) {
-	config := DefaultConfig()
+	config := relay.DefaultConfig()
 
 	// Verify reasonable defaults
 	if config.PollingInterval < time.Second {
@@ -75,7 +76,7 @@ func TestConfigValidation(t *testing.T) {
 
 // TestMetricsThreadSafety verifies metrics are thread-safe
 func TestMetricsThreadSafety(t *testing.T) {
-	metrics := NewMetrics()
+	metrics := relay.NewMetrics()
 
 	// Simulate concurrent access
 	done := make(chan bool, 10)
@@ -113,7 +114,7 @@ func TestMetricsThreadSafety(t *testing.T) {
 
 // TestMetricsHealthCheck verifies health monitoring works correctly
 func TestMetricsHealthCheck(t *testing.T) {
-	metrics := NewMetrics()
+	metrics := relay.NewMetrics()
 
 	// Initially should be healthy (recent activity)
 	if !metrics.IsHealthy() {
@@ -131,39 +132,39 @@ func TestMetricsHealthCheck(t *testing.T) {
 
 // TestPublisherCreation verifies publisher can be created and implements interface
 func TestPublisherCreation(t *testing.T) {
-	publisher := &DefaultPublisher{}
+	publisher := &relay.DefaultPublisher{}
 	if publisher == nil {
 		t.Error("DefaultPublisher should be created successfully")
 	}
 
 	// Test interface compliance
-	var _ Publisher = publisher
+	var _ relay.Publisher = publisher
 
 	t.Log("Publisher creation and interface compliance verified")
 }
 
 // TestProcessorCreation verifies processor can be created and implements interface
 func TestProcessorCreation(t *testing.T) {
-	processor := &DefaultProcessor{}
+	processor := &relay.DefaultProcessor{}
 	if processor == nil {
 		t.Error("DefaultProcessor should be created successfully")
 	}
 
 	// Test interface compliance
-	var _ Processor = processor
+	var _ relay.Processor = processor
 
 	t.Log("Processor creation and interface compliance verified")
 }
 
 // TestCleanupCreation verifies cleanup can be created and implements interface
 func TestCleanupCreation(t *testing.T) {
-	cleanup := &DefaultCleanup{}
+	cleanup := &relay.DefaultCleanup{}
 	if cleanup == nil {
 		t.Error("DefaultCleanup should be created successfully")
 	}
 
 	// Test interface compliance
-	var _ Cleanup = cleanup
+	var _ relay.Cleanup = cleanup
 
 	t.Log("Cleanup creation and interface compliance verified")
 }
@@ -171,15 +172,15 @@ func TestCleanupCreation(t *testing.T) {
 // TestRelayComponentIntegration verifies all components can be wired together
 func TestRelayComponentIntegration(t *testing.T) {
 	// Test that all components can be created and wired together
-	config := DefaultConfig()
-	publisher := &DefaultPublisher{}
-	processor := &DefaultProcessor{}
-	cleanup := &DefaultCleanup{}
+	config := relay.DefaultConfig()
+	publisher := &relay.DefaultPublisher{}
+	processor := &relay.DefaultProcessor{}
+	cleanup := &relay.DefaultCleanup{}
 
 	// Test interface compliance for dependency injection
-	var _ Publisher = publisher
-	var _ Processor = processor
-	var _ Cleanup = cleanup
+	var _ relay.Publisher = publisher
+	var _ relay.Processor = processor
+	var _ relay.Cleanup = cleanup
 
 	// Test that NewRelay accepts the interfaces (would panic without real DB, but that's expected)
 	defer func() {
@@ -191,7 +192,7 @@ func TestRelayComponentIntegration(t *testing.T) {
 
 	// This will panic without a real DB, but that's the expected behavior for the test
 	// In integration tests, we'd provide a real test database
-	_ = NewRelay(nil, publisher, processor, cleanup, config)
+	_ = relay.NewRelay(nil, publisher, processor, cleanup, config)
 
 	t.Log("Relay component integration test completed")
 }
@@ -199,7 +200,7 @@ func TestRelayComponentIntegration(t *testing.T) {
 // TestRelayConfiguration verifies relay accepts different configurations
 func TestRelayConfiguration(t *testing.T) {
 	// Test custom configuration
-	customConfig := Config{
+	customConfig := relay.Config{
 		PollingInterval: 10 * time.Second,
 		BatchSize:       50,
 		MaxRetries:      3,
@@ -215,21 +216,21 @@ func TestRelayConfiguration(t *testing.T) {
 		}
 	}()
 
-	publisher := &DefaultPublisher{}
-	processor := &DefaultProcessor{}
-	cleanup := &DefaultCleanup{}
+	publisher := &relay.DefaultPublisher{}
+	processor := &relay.DefaultProcessor{}
+	cleanup := &relay.DefaultCleanup{}
 
-	_ = NewRelay(nil, publisher, processor, cleanup, customConfig)
+	_ = relay.NewRelay(nil, publisher, processor, cleanup, customConfig)
 
 	t.Log("Relay configuration test completed")
 }
 
 // TestPublisherTopicRouting verifies topic routing logic works correctly
 func TestPublisherTopicRouting(t *testing.T) {
-	publisher := &DefaultPublisher{}
+	publisher := &relay.DefaultPublisher{}
 
 	// Test that publisher implements interface correctly
-	var _ Publisher = publisher
+	var _ relay.Publisher = publisher
 
 	// Test topic routing for different event types
 	testCases := []struct {
@@ -250,9 +251,9 @@ func TestPublisherTopicRouting(t *testing.T) {
 	for _, tc := range testCases {
 		// Create a mock outbox event
 		outboxEvent := &repository.OutboxEvent{
-			ID:     "test-id",
-			Topic:  tc.topic,
-			Data:   []byte(`{"test": "data"}`),
+			ID:    "test-id",
+			Topic: tc.topic,
+			Data:  []byte(`{"test": "data"}`),
 		}
 
 		// Create a mock booking event
@@ -281,10 +282,10 @@ func TestPublisherTopicRouting(t *testing.T) {
 
 // TestProcessorEventHandling verifies event processing logic
 func TestProcessorEventHandling(t *testing.T) {
-	processor := &DefaultProcessor{}
+	processor := &relay.DefaultProcessor{}
 
 	// Test that processor implements interface correctly
-	var _ Processor = processor
+	var _ relay.Processor = processor
 
 	// Test that GetUnprocessedEvents doesn't panic (would fail without DB, but that's expected)
 	defer func() {
@@ -304,10 +305,10 @@ func TestProcessorEventHandling(t *testing.T) {
 
 // TestCleanupMaintenance verifies cleanup logic
 func TestCleanupMaintenance(t *testing.T) {
-	cleanup := &DefaultCleanup{}
+	cleanup := &relay.DefaultCleanup{}
 
 	// Test that cleanup implements interface correctly
-	var _ Cleanup = cleanup
+	var _ relay.Cleanup = cleanup
 
 	// Test that CleanupOldEvents doesn't panic (would fail without DB, but that's expected)
 	defer func() {

@@ -20,7 +20,7 @@ import (
 //encore:service
 type Service struct {
 	bookingsHandler *handlers.BookingsHandler
-	relay          *relay.OutboxRelay // For graceful shutdown
+	relay           *relay.OutboxRelay // For graceful shutdown
 }
 
 // BookingDB initializes the booking service database
@@ -67,7 +67,7 @@ func initService() (*Service, error) {
 
 	svc := &Service{
 		bookingsHandler: bookingsHandler,
-		relay:          relayInstance, // Store reference for graceful shutdown
+		relay:           relayInstance, // Store reference for graceful shutdown
 	}
 
 	return svc, nil
@@ -128,22 +128,59 @@ func (s *Service) ListArtisanOffers(ctx context.Context, params *handlers.ListOf
 
 var _ = pubsub.NewSubscription(
 	events.QuoteAcceptedTopic, "handle-quote-accepted",
-	pubsub.SubscriptionConfig[*domain.BookingEvent]{
-		Handler: pubsub.MethodHandler((*Service).OnQuoteAccepted),
+	pubsub.SubscriptionConfig[*events.EventEnvelope[domain.BookingEvent]]{
+		Handler: func(ctx context.Context, envelope *events.EventEnvelope[domain.BookingEvent]) error {
+			// Propagate correlation/causation from envelope to context
+			ctx = events.WithEventMetadata(ctx, &events.EventMetadata{
+				CorrelationID: envelope.CorrelationID,
+				CausationID:   envelope.EventID, // This event becomes the cause of next event
+				UserID:        envelope.Data.UserID,
+			})
+
+			s, err := initService()
+			if err != nil {
+				return err
+			}
+			return s.OnQuoteAccepted(ctx, &envelope.Data)
+		},
 	},
 )
 
 var _ = pubsub.NewSubscription(
 	events.QuoteRejectedTopic, "handle-quote-rejected",
-	pubsub.SubscriptionConfig[*domain.BookingEvent]{
-		Handler: pubsub.MethodHandler((*Service).OnQuoteRejected),
+	pubsub.SubscriptionConfig[*events.EventEnvelope[domain.BookingEvent]]{
+		Handler: func(ctx context.Context, envelope *events.EventEnvelope[domain.BookingEvent]) error {
+			ctx = events.WithEventMetadata(ctx, &events.EventMetadata{
+				CorrelationID: envelope.CorrelationID,
+				CausationID:   envelope.EventID,
+				UserID:        envelope.Data.UserID,
+			})
+
+			s, err := initService()
+			if err != nil {
+				return err
+			}
+			return s.OnQuoteRejected(ctx, &envelope.Data)
+		},
 	},
 )
 
 var _ = pubsub.NewSubscription(
 	events.PaymentConfirmedTopic, "handle-payment-confirmed",
-	pubsub.SubscriptionConfig[*domain.BookingEvent]{
-		Handler: pubsub.MethodHandler((*Service).OnPaymentConfirmed),
+	pubsub.SubscriptionConfig[*events.EventEnvelope[domain.BookingEvent]]{
+		Handler: func(ctx context.Context, envelope *events.EventEnvelope[domain.BookingEvent]) error {
+			ctx = events.WithEventMetadata(ctx, &events.EventMetadata{
+				CorrelationID: envelope.CorrelationID,
+				CausationID:   envelope.EventID,
+				UserID:        envelope.Data.UserID,
+			})
+
+			s, err := initService()
+			if err != nil {
+				return err
+			}
+			return s.OnPaymentConfirmed(ctx, &envelope.Data)
+		},
 	},
 )
 

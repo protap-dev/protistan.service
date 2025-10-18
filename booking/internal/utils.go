@@ -1,6 +1,8 @@
 package internal
 
 import (
+	"crypto/rand"
+	"encoding/hex"
 	"fmt"
 
 	"github.com/google/uuid"
@@ -27,7 +29,20 @@ func BookingCacheKey(id string) string {
 	return fmt.Sprintf("booking:%s", id)
 }
 
-// GenerateUUID generates a new UUID for outbox events and other purposes
+// GenerateUUID generates a new UUID using Google UUID library
 func GenerateUUID() string {
 	return uuid.New().String()
+}
+
+// GenerateRandomID generates a random 16-byte ID encoded as hex string
+// This is used for correlation/causation IDs and event IDs
+func GenerateRandomID() string {
+	bytes := make([]byte, 16)
+	rand.Read(bytes)
+	return hex.EncodeToString(bytes)
+}
+
+// GenerateEventID is an alias for GenerateRandomID for backward compatibility
+func GenerateEventID() string {
+	return GenerateRandomID()
 }

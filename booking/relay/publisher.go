@@ -21,32 +21,32 @@ func (p *DefaultPublisher) PublishToTopic(ctx context.Context, outboxEvent *repo
 	// Use the stored topic name from outbox table for routing
 	switch outboxEvent.Topic {
 	case "booking.status":
-		_, err := events.StatusTopic.Publish(ctx, event)
+		_, err := events.StatusTopic.Publish(ctx, events.CreateEventEnvelope(ctx, "booking.status", *event))
 		return err
 	case "booking.created":
-		_, err := events.CreatedTopic.Publish(ctx, event)
+		_, err := events.CreatedTopic.Publish(ctx, events.CreateEventEnvelope(ctx, "booking.created", *event))
 		return err
 	case "booking.cancelled":
-		_, err := events.CancelledTopic.Publish(ctx, event)
+		_, err := events.CancelledTopic.Publish(ctx, events.CreateEventEnvelope(ctx, "booking.cancelled", *event))
 		return err
 	case "booking.offered":
-		_, err := events.OfferedTopic.Publish(ctx, event)
+		_, err := events.OfferedTopic.Publish(ctx, events.CreateEventEnvelope(ctx, "booking.offered", *event))
 		return err
 	case "booking.assigned":
-		_, err := events.AssignedTopic.Publish(ctx, event)
+		_, err := events.AssignedTopic.Publish(ctx, events.CreateEventEnvelope(ctx, "booking.assigned", *event))
 		return err
 	case "booking.quote.accepted":
-		_, err := events.QuoteAcceptedTopic.Publish(ctx, event)
+		_, err := events.QuoteAcceptedTopic.Publish(ctx, events.CreateEventEnvelope(ctx, "booking.quote.accepted", *event))
 		return err
 	case "booking.quote.rejected":
-		_, err := events.QuoteRejectedTopic.Publish(ctx, event)
+		_, err := events.QuoteRejectedTopic.Publish(ctx, events.CreateEventEnvelope(ctx, "booking.quote.rejected", *event))
 		return err
 	case "booking.payment.confirmed":
-		_, err := events.PaymentConfirmedTopic.Publish(ctx, event)
+		_, err := events.PaymentConfirmedTopic.Publish(ctx, events.CreateEventEnvelope(ctx, "booking.payment.confirmed", *event))
 		return err
 	default:
 		// Default to status topic for unknown topic names
-		_, err := events.StatusTopic.Publish(ctx, event)
+		_, err := events.StatusTopic.Publish(ctx, events.CreateEventEnvelope(ctx, "booking.status", *event))
 		return err
 	}
 }
