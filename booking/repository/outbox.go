@@ -6,7 +6,6 @@ import (
 	"time"
 
 	"encore.app/booking/domain"
-	binternal "encore.app/booking/internal"
 	"gorm.io/gorm"
 )
 
@@ -18,7 +17,6 @@ func insertEventInOutbox[T any](db *gorm.DB, ctx context.Context, event T, topic
 	}
 
 	dbModel := &OutboxEvent{
-		ID:          binternal.GenerateUUID(),
 		Topic:       topic,
 		Data:        jsonData,
 		InsertedAt:  time.Now(),

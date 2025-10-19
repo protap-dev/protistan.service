@@ -189,6 +189,25 @@ var _ = pubsub.NewSubscription(
 	},
 )
 
+var _ = pubsub.NewSubscription(
+	events.PaymentFailedTopic, "handle-payment-failed",
+	pubsub.SubscriptionConfig[*events.EventEnvelope[domain.BookingEvent]]{
+		Handler: func(ctx context.Context, envelope *events.EventEnvelope[domain.BookingEvent]) error {
+			ctx = events.WithEventMetadata(ctx, &events.EventMetadata{
+				CorrelationID: envelope.CorrelationID,
+				CausationID:   envelope.EventID,
+				UserID:        envelope.Data.UserID,
+			})
+
+			s, err := initService()
+			if err != nil {
+				return err
+			}
+			return s.OnPaymentFailed(ctx, &envelope.Data)
+		},
+	},
+)
+
 // TODO: Add subscription for quote.proposed when quotes service is implemented
 // var _ = pubsub.NewSubscription(
 //     events.QuoteProposedTopic, "handle-quote-proposed",
@@ -228,4 +247,26 @@ func (s *Service) OnPaymentConfirmed(ctx context.Context, event *domain.BookingE
 		return err
 	}
 	return s.bookingsHandler.UpdateBookingStatusInternal(ctx, event.BookingID, domain.BookingConfirmed, event.UserID, nil, current)
+}
+
+func (s *Service) OnPaymentFailed(ctx context.Context, event *domain.BookingEvent) error {
+	current, err := s.bookingsHandler.GetRepository().GetByID(ctx, event.BookingID)
+	if err != nil {
+		return err
+	}
+
+	// Only handle payment failures for bookings in payment pending state
+	if current.Status != domain.BookingPaymentPending {
+		// Idempotent - if booking is not in payment pending, we've already handled this failure
+		return nil
+	}
+
+	// Check if this is actually a payment failure event (indicated by reason)
+	if event.Reason == nil || *event.Reason != "payment_failed" {
+		// Not a payment failure event, ignore
+		return nil
+	}
+
+	// Transition back to quote accepted state
+	return s.bookingsHandler.UpdateBookingStatusInternal(ctx, event.BookingID, domain.BookingQuoteAccepted, event.UserID, event.Reason, current)
 }

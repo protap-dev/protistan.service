@@ -47,6 +47,11 @@ var (
 		DeliveryGuarantee: pubsub.AtLeastOnce,
 	})
 
+	// PaymentFailedTopic publishes payment failure events (external topic from payment service)
+	PaymentFailedTopic = pubsub.NewTopic[*EventEnvelope[domain.BookingEvent]]("payment-failed", pubsub.TopicConfig{
+		DeliveryGuarantee: pubsub.AtLeastOnce,
+	})
+
 	// OfferRejectedTopic publishes offer rejection events wrapped in envelope
 	OfferRejectedTopic = pubsub.NewTopic[*EventEnvelope[domain.BookingEvent]]("booking-offer-rejected", pubsub.TopicConfig{
 		DeliveryGuarantee: pubsub.AtLeastOnce,

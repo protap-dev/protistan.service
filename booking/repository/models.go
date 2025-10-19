@@ -70,7 +70,7 @@ func (offerDBModel) TableName() string {
 
 // OutboxEvent represents an event stored in the outbox table for guaranteed event publishing
 type OutboxEvent struct {
-	ID          string     `gorm:"column:id;primaryKey"`
+	ID          string     `gorm:"primaryKey;autoIncrement"`
 	Topic       string     `gorm:"column:topic;not null"`
 	Data        []byte     `gorm:"column:data;type:jsonb;not null"`
 	InsertedAt  time.Time  `gorm:"column:inserted_at;not null;default:now()"`

@@ -419,7 +419,6 @@ func (h *BookingsHandler) UpdateBookingStatusInternal(ctx context.Context, booki
 	err := h.repo.WithTransaction(ctx, func(txRepo domain.BookingRepository) error {
 		// Use the passed current booking instead of fetching it again
 		// current, err := txRepo.GetByID(ctx, bookingID)  // Remove this line
-		// if err != nil { ... }  // Remove this block
 
 		// Store previous status for event publishing
 		previousStatus = current.Status

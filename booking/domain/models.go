@@ -32,7 +32,7 @@ var validTransitions = map[BookingStatus]map[BookingStatus]bool{
 	BookingPendingQuote:   {BookingQuoteProposed: true, BookingCancelled: true},
 	BookingQuoteProposed:  {BookingQuoteAccepted: true, BookingCancelled: true},
 	BookingQuoteAccepted:  {BookingPaymentPending: true, BookingCancelled: true},
-	BookingPaymentPending: {BookingConfirmed: true, BookingCancelled: true},
+	BookingPaymentPending: {BookingConfirmed: true, BookingCancelled: true, BookingQuoteAccepted: true, BookingAssigned: true},
 	BookingConfirmed:      {BookingEnroute: true, BookingCancelled: true},
 	BookingEnroute:        {BookingInProgress: true, BookingCancelled: true},
 	BookingInProgress:     {BookingCompleted: true, BookingCancelled: true},
@@ -54,11 +54,11 @@ type Booking struct {
 	ScheduledAt           *time.Time        `json:"scheduled_at,omitempty"`
 	EstimatedDurationMins int               `json:"estimated_duration_mins,omitempty"`
 	Metadata              map[string]string `json:"metadata,omitempty"`
-	
+
 	// Offer tracking
 	IsSpecificArtisan bool `json:"is_specific_artisan"` // true if customer requested specific artisan
 	OffersCount       int  `json:"offers_count"`        // Total offers made
-	
+
 	CreatedAt time.Time `json:"created_at"`
 	UpdatedAt time.Time `json:"updated_at"`
 	Version   int64     `json:"version"` // For optimistic locking
