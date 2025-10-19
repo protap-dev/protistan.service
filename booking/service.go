@@ -11,6 +11,7 @@ import (
 	"encore.app/booking/repository"
 	"encore.app/core"
 	"encore.app/core/cache"
+	"encore.dev/cron"
 	"encore.dev/pubsub"
 	"encore.dev/storage/sqldb"
 	"gorm.io/driver/postgres"
@@ -269,4 +270,23 @@ func (s *Service) OnPaymentFailed(ctx context.Context, event *domain.BookingEven
 
 	// Transition back to quote accepted state
 	return s.bookingsHandler.UpdateBookingStatusInternal(ctx, event.BookingID, domain.BookingQuoteAccepted, event.UserID, event.Reason, current)
+}
+
+// ExpireOffers is a cron job that expires pending offers
+var _ = cron.NewJob("offer-expiry", cron.JobConfig{
+	Title:    "Expire Pending Offers",
+	Every:    10 * cron.Minute,
+	Endpoint: ExpireOffers,
+})
+
+// ExpireOffers scans for expired pending offers and transitions them
+//
+//encore:api private method=POST path=/internal/expire-offers
+func ExpireOffers(ctx context.Context) error {
+	svc, err := initService()
+	if err != nil {
+		return err
+	}
+
+	return svc.bookingsHandler.ExpireOffers(ctx)
 }

@@ -110,3 +110,48 @@ func (r *bookingRepository) CancelPendingOffers(ctx context.Context, bookingID s
 			"updated_at": time.Now(),
 		}).Error
 }
+
+// FindExpiredOffers finds all pending offers that have expired
+func (r *bookingRepository) FindExpiredOffers(ctx context.Context) ([]*domain.BookingOffer, error) {
+	var offers []*domain.BookingOffer
+
+	err := r.db.WithContext(ctx).
+		Where("status = ? AND expires_at <= ?", domain.OfferPending, time.Now()).
+		Order("expires_at ASC"). // Process oldest first
+		Find(&offers).Error
+
+	if err != nil {
+		return nil, err
+	}
+
+	return offers, nil
+}
+
+// UpdateOffer updates an existing offer
+func (r *bookingRepository) UpdateOffer(ctx context.Context, offer *domain.BookingOffer) error {
+	offer.UpdatedAt = time.Now()
+
+	result := r.db.WithContext(ctx).
+		Model(&domain.BookingOffer{}).
+		Where("id = ?", offer.ID).
+		Updates(map[string]any{
+			"status":       offer.Status,
+			"responded_at": offer.RespondedAt,
+			"updated_at":   offer.UpdatedAt,
+		})
+
+	if result.Error != nil {
+		return result.Error
+	}
+
+	if result.RowsAffected == 0 {
+		return domain.ErrOfferNotFound
+	}
+
+	return nil
+}
+
+// CreateOfferExpiredEventInOutbox writes offer expired event to outbox
+func (r *bookingRepository) CreateOfferExpiredEventInOutbox(ctx context.Context, event *domain.BookingEvent) error {
+	return insertEventInOutbox(r.db, ctx, event, "booking.v1.offer.expired")
+}

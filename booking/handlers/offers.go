@@ -7,6 +7,7 @@ import (
 
 	"encore.app/booking/domain"
 	binternal "encore.app/booking/internal"
+	"encore.dev/beta/errs"
 	"encore.dev/types/uuid"
 )
 
@@ -409,4 +410,136 @@ func (h *BookingsHandler) ListArtisanOffers(ctx context.Context, params *ListOff
 		Offers: offerResponses,
 		Total:  len(offerResponses),
 	}, nil
+}
+
+// ExpireOffers scans for expired pending offers and transitions them to expired status.
+// This is called by the cron job every 10 minutes.
+// It publishes booking.v1.offer.expired events via the transactional outbox.
+func (h *BookingsHandler) ExpireOffers(ctx context.Context) error {
+	h.logger.Info(ctx, "starting offer expiry scan", nil)
+
+	// Find all expired pending offers
+	expiredOffers, err := h.repo.FindExpiredOffers(ctx)
+	if err != nil {
+		h.logger.Error(ctx, "failed to find expired offers", err, nil)
+		return err
+	}
+
+	if len(expiredOffers) == 0 {
+		h.logger.Info(ctx, "no expired offers found", map[string]interface{}{
+			"scanned_at": time.Now(),
+		})
+		return nil
+	}
+
+	h.logger.Info(ctx, "found expired offers", map[string]interface{}{
+		"count": len(expiredOffers),
+	})
+
+	// Process each expired offer atomically
+	successCount := 0
+	errorCount := 0
+
+	for _, offer := range expiredOffers {
+		err := h.expireOffer(ctx, offer)
+		if err != nil {
+			h.logger.Error(ctx, "failed to expire offer", err, map[string]interface{}{
+				"offer_id":   offer.ID,
+				"booking_id": offer.BookingID,
+			})
+			errorCount++
+			continue
+		}
+		successCount++
+	}
+
+	h.logger.Info(ctx, "offer expiry scan completed", map[string]interface{}{
+		"success_count": successCount,
+		"error_count":   errorCount,
+		"total":         len(expiredOffers),
+	})
+
+	// Return error if any offers failed to process
+	if errorCount > 0 {
+		return errs.B().
+			Code(errs.Internal).
+			Msgf("failed to expire %d out of %d offers", errorCount, len(expiredOffers)).
+			Err()
+	}
+
+	return nil
+}
+
+// expireOffer transitions a single offer to expired status and publishes event
+func (h *BookingsHandler) expireOffer(ctx context.Context, offer *domain.BookingOffer) error {
+	return h.repo.WithTransaction(ctx, func(txRepo domain.BookingRepository) error {
+		// Re-fetch offer within transaction to ensure we have latest state
+		currentOffer, err := txRepo.GetOfferByID(ctx, offer.ID)
+		if err != nil {
+			return err
+		}
+
+		// Idempotency check: only process if still pending
+		if currentOffer.Status != domain.OfferPending {
+			h.logger.Info(ctx, "offer already processed, skipping", map[string]any{
+				"offer_id": offer.ID,
+				"status":   currentOffer.Status,
+			})
+			return nil
+		}
+
+		// Double-check expiry within transaction (defensive)
+		if !currentOffer.IsExpired() {
+			h.logger.Info(ctx, "offer no longer expired, skipping", map[string]any{
+				"offer_id":   offer.ID,
+				"expires_at": currentOffer.ExpiresAt,
+			})
+			return nil
+		}
+
+		// Update offer status to expired
+		now := time.Now()
+		currentOffer.Status = domain.OfferExpired
+		currentOffer.UpdatedAt = now
+		currentOffer.RespondedAt = &now // Mark when it was expired
+
+		// Save updated offer
+		if err := txRepo.UpdateOffer(ctx, currentOffer); err != nil {
+			return err
+		}
+
+		// Create offer expired event
+		event := &domain.BookingEvent{
+			BookingID:      currentOffer.BookingID,
+			Status:         domain.BookingOfferRejected,
+			PreviousStatus: domain.BookingOfferPending,
+			Timestamp:      now,
+			UserID:         "system",
+			ArtisanID:      &currentOffer.ArtisanID,
+			Reason:         stringPtr("offer_expired"),
+			Metadata: map[string]string{
+				"offer_id":   currentOffer.ID,
+				"expired_at": now.Format(time.RFC3339),
+				"expires_at": currentOffer.ExpiresAt.Format(time.RFC3339),
+			},
+		}
+
+		// Write event to outbox for guaranteed delivery
+		if err := txRepo.CreateOfferExpiredEventInOutbox(ctx, event); err != nil {
+			return err
+		}
+
+		h.logger.Info(ctx, "offer expired successfully", map[string]interface{}{
+			"offer_id":   currentOffer.ID,
+			"booking_id": currentOffer.BookingID,
+			"artisan_id": currentOffer.ArtisanID,
+		})
+
+		return nil
+	})
+}
+
+// Helper function
+func stringPtr(s string) *string {
+	return &s
 }

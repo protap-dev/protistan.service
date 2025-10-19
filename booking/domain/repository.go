@@ -56,4 +56,9 @@ type BookingRepository interface {
 	// CreateRematchEventInOutbox writes a rematch event directly to the outbox table within a transaction.
 	// This ensures rematch events are published atomically.
 	CreateRematchEventInOutbox(ctx context.Context, event *RematchEvent) error
+
+	// Offer methods
+	FindExpiredOffers(ctx context.Context) ([]*BookingOffer, error)
+	UpdateOffer(ctx context.Context, offer *BookingOffer) error
+	CreateOfferExpiredEventInOutbox(ctx context.Context, event *BookingEvent) error
 }
