@@ -2,6 +2,7 @@ package booking
 
 import (
 	"context"
+	"sync"
 
 	"encore.app/booking/domain"
 	"encore.app/booking/events"
@@ -32,49 +33,57 @@ var BookingDB = sqldb.NewDatabase("booking", sqldb.DatabaseConfig{
 	Migrations: "./migrations",
 })
 
-// NewService creates a new booking service
+var serviceInstance *Service
+var serviceOnce sync.Once
+
+// initService creates or returns the singleton service instance
 func initService() (*Service, error) {
-	// Initialize GORM connection using booking service's own database
-	gormDB, err := gorm.Open(postgres.New(postgres.Config{
-		Conn: BookingDB.Stdlib(),
-	}), &gorm.Config{})
-	if err != nil {
-		return nil, err
-	}
+	var initErr error
 
-	// Initialize core service for shared infrastructure
-	coreSvc := core.NewCoreService(gormDB)
+	serviceOnce.Do(func() {
+		// Initialize GORM connection
+		gormDB, err := gorm.Open(postgres.New(postgres.Config{
+			Conn: BookingDB.Stdlib(),
+		}), &gorm.Config{})
+		if err != nil {
+			initErr = err
+			return
+		}
 
-	// Initialize dependencies
-	logger := binternal.NewServiceLogger("booking")
-	authHelper := binternal.NewAuthHelper(logger)
-	validator := domain.NewBookingValidator()
-	offerValidator := domain.NewOfferValidator()
-	repo := repository.NewBookingRepository(coreSvc.DB())
-	cache := cache.NewInMemoryCache()
-	publisher := events.NewEventPublisher()
+		// Initialize core service
+		coreSvc := core.NewCoreService(gormDB)
 
-	// Initialize handlers layer
-	bookingsHandler := handlers.NewBookingsHandler(repo, validator, offerValidator, logger, cache, coreSvc, authHelper, publisher)
+		// Initialize dependencies (SHARED across all requests)
+		logger := binternal.NewServiceLogger("booking")
+		authHelper := binternal.NewAuthHelper(logger)
+		validator := domain.NewBookingValidator()
+		offerValidator := domain.NewOfferValidator()
+		repo := repository.NewBookingRepository(coreSvc.DB())
+		cache := cache.NewInMemoryCache() // SINGLE CACHE INSTANCE
+		publisher := events.NewEventPublisher()
 
-	// Initialize and start outbox relay with production-ready configuration
-	relayConfig := relay.Config{
-		PollingInterval: binternal.DefaultOutboxRelayConfig().PollingInterval,
-		BatchSize:       binternal.DefaultOutboxRelayConfig().BatchSize,
-		MaxRetries:      binternal.DefaultOutboxRelayConfig().MaxRetries,
-		RetryBaseDelay:  binternal.DefaultOutboxRelayConfig().RetryBaseDelay,
-		RetryMaxDelay:   binternal.DefaultOutboxRelayConfig().RetryMaxDelay,
-		AuditRetention:  binternal.DefaultOutboxRelayConfig().AuditRetention,
-	}
-	relayInstance := relay.NewOutboxRelay(coreSvc.DB(), publisher, relayConfig)
-	go relayInstance.Start(context.Background())
+		// Initialize handlers layer
+		bookingsHandler := handlers.NewBookingsHandler(repo, validator, offerValidator, logger, cache, coreSvc, authHelper, publisher)
 
-	svc := &Service{
-		bookingsHandler: bookingsHandler,
-		relay:           relayInstance, // Store reference for graceful shutdown
-	}
+		// Initialize outbox relay
+		relayConfig := relay.Config{
+			PollingInterval: binternal.DefaultOutboxRelayConfig().PollingInterval,
+			BatchSize:       binternal.DefaultOutboxRelayConfig().BatchSize,
+			MaxRetries:      binternal.DefaultOutboxRelayConfig().MaxRetries,
+			RetryBaseDelay:  binternal.DefaultOutboxRelayConfig().RetryBaseDelay,
+			RetryMaxDelay:   binternal.DefaultOutboxRelayConfig().RetryMaxDelay,
+			AuditRetention:  binternal.DefaultOutboxRelayConfig().AuditRetention,
+		}
+		relayInstance := relay.NewOutboxRelay(coreSvc.DB(), publisher, relayConfig)
+		go relayInstance.Start(context.Background())
 
-	return svc, nil
+		serviceInstance = &Service{
+			bookingsHandler: bookingsHandler,
+			relay:           relayInstance,
+		}
+	})
+
+	return serviceInstance, initErr
 }
 
 //encore:api auth method=POST path=/v0/bookings
@@ -225,13 +234,26 @@ var _ = pubsub.NewSubscription(
 	},
 )
 
-// TODO: Add subscription for quote.proposed when quotes service is implemented
-// var _ = pubsub.NewSubscription(
-//     events.QuoteProposedTopic, "handle-quote-proposed",
-//     pubsub.SubscriptionConfig[*domain.BookingEvent]{
-//         Handler: pubsub.MethodHandler((*Service).OnQuoteProposed),
-//     },
-// )
+var _ = pubsub.NewSubscription(
+	quote.QuoteProposedTopic, "handle-quote-proposed",
+	pubsub.SubscriptionConfig[*eventscommon.EventEnvelope[eventscommon.BookingEvent]]{
+		Handler: func(ctx context.Context, envelope *eventscommon.EventEnvelope[eventscommon.BookingEvent]) error {
+			domainEvent := convertToDomainEvent(&envelope.Data)
+
+			ctx = events.WithEventMetadata(ctx, &events.EventMetadata{
+				CorrelationID: envelope.CorrelationID,
+				CausationID:   envelope.EventID,
+				UserID:        envelope.Data.UserID,
+			})
+
+			s, err := initService()
+			if err != nil {
+				return err
+			}
+			return s.OnQuoteProposed(ctx, domainEvent)
+		},
+	},
+)
 
 // Helper function to convert common event to domain event
 func convertToDomainEvent(commonEvent *eventscommon.BookingEvent) *domain.BookingEvent {

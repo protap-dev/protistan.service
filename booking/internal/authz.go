@@ -2,7 +2,9 @@ package internal
 
 import (
 	"context"
+	"fmt"
 
+	"encore.app/artisans"
 	"encore.app/booking/domain"
 	"encore.dev/beta/errs"
 )
@@ -26,13 +28,30 @@ func AuthorizeStatusUpdate(ctx context.Context, role string, userID string, book
 			return ErrPermissionDenied
 		}
 		return nil
+
 	case "artisan":
-		if booking.ArtisanID == nil || *booking.ArtisanID != userID {
+		if booking.ArtisanID == nil {
 			return ErrPermissionDenied
 		}
+
+		artisanResp, err := artisans.GetArtisanIDByUserID(ctx, userID)
+		if err != nil {
+			return fmt.Errorf("failed to verify artisan access: %w", err)
+		}
+
+		if !artisanResp.Found {
+			return ErrPermissionDenied
+		}
+
+		if *booking.ArtisanID != artisanResp.ArtisanID {
+			return ErrPermissionDenied
+		}
+
 		return nil
+
 	case "admin":
 		return nil
+
 	default:
 		return ErrPermissionDenied
 	}
@@ -72,7 +91,7 @@ func AuthorizeOfferCreation(ctx context.Context, userID string, booking *domain.
 	if booking.CustomerID != userID {
 		return ErrPermissionDenied
 	}
-	
+
 	// Booking must be in a state where it can be offered
 	if booking.Status != domain.BookingRequested {
 		return errs.B().
@@ -80,7 +99,7 @@ func AuthorizeOfferCreation(ctx context.Context, userID string, booking *domain.
 			Msg("booking must be in requested status to be offered").
 			Err()
 	}
-	
+
 	// Booking must not already have an artisan assigned
 	if booking.ArtisanID != nil {
 		return errs.B().
@@ -88,7 +107,7 @@ func AuthorizeOfferCreation(ctx context.Context, userID string, booking *domain.
 			Msg("booking already has an assigned artisan").
 			Err()
 	}
-	
+
 	return nil
 }
 
@@ -98,7 +117,7 @@ func AuthorizeOfferResponse(ctx context.Context, userID string, offer *domain.Bo
 	if offer.ArtisanID != userID {
 		return ErrPermissionDenied
 	}
-	
+
 	return nil
 }
 
@@ -108,12 +127,12 @@ func AuthorizeViewOffers(ctx context.Context, userID string, booking *domain.Boo
 	if booking.CustomerID == userID {
 		return nil
 	}
-	
+
 	// Assigned artisan can view offers (to see competing offers)
 	if booking.ArtisanID != nil && *booking.ArtisanID == userID {
 		return nil
 	}
-	
+
 	// Admin can view (handled in handler layer)
 	return ErrPermissionDenied
 }

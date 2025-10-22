@@ -2,6 +2,7 @@ package handlers
 
 import (
 	"context"
+	"errors"
 	"strings"
 
 	"encore.app/artisans/domain"
@@ -87,6 +88,18 @@ type ProfileResponse struct {
 	PreferredCity       string   `json:"preferred_city"`
 	PreferredState      string   `json:"preferred_state"`
 	PreferredCountry    string   `json:"preferred_country"`
+}
+
+// GetArtisanIDByUserIDRequest for internal service calls
+type GetArtisanIDByUserIDRequest struct {
+	UserID string `json:"user_id"`
+}
+
+// GetArtisanIDByUserIDResponse returns just the artisan ID
+type GetArtisanIDByUserIDResponse struct {
+	UserID    string `json:"user_id"`
+	ArtisanID string `json:"artisan_id"`
+	Found     bool   `json:"found"`
 }
 
 // CompleteProfileResponse represents the complete profile response
@@ -247,4 +260,26 @@ func toProfileResponse(profile *domain.ArtisanProfile) ProfileResponse {
 		PreferredState:      profile.PreferredState,
 		PreferredCountry:    profile.PreferredCountry,
 	}
+}
+
+func (h *ProfileHandler) GetArtisanIDByUserID(ctx context.Context, userID string) (*GetArtisanIDByUserIDResponse, error) {
+	h.logger.LogUserAction(ctx, "get_artisan_id_by_user_id", userID)
+
+	result, err := h.service.GetArtisanIDByUserID(ctx, userID)
+	if err != nil {
+		if errors.Is(err, domain.ErrNotFound) {
+			// User is not an artisan - not an error, just not found
+			return &GetArtisanIDByUserIDResponse{
+				UserID: userID,
+				Found:  false,
+			}, nil
+		}
+		return nil, err
+	}
+
+	return &GetArtisanIDByUserIDResponse{
+		UserID:    userID,
+		ArtisanID: result,
+		Found:     true,
+	}, nil
 }

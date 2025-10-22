@@ -459,7 +459,6 @@ func (h *BookingsHandler) UpdateBookingStatusInternal(ctx context.Context, booki
 	}
 
 	// Update cache
-	h.cache.Delete(ctx, binternal.BookingCacheKey(bookingID))
 	h.cache.Set(ctx, binternal.BookingCacheKey(bookingID), updatedBooking, binternal.DefaultServiceConfig().Cache.BookingTTL)
 
 	return nil

@@ -20,8 +20,24 @@ create table bookings (
 
     -- Constraints
     constraint valid_status check (
-        status in ('requested', 'assigned', 'payment_pending', 'confirmed', 'enroute', 'in_progress', 'completed', 'cancelled', 'closed')
-    ),
+    status IN (
+        'requested',
+        'offer_pending',
+        'offer_rejected',
+        'assigned',
+        'pending_quote',
+        'quote_proposed',
+        'quote_accepted',
+        'quote_rejected',
+        'payment_pending',
+        'confirmed',
+        'enroute',
+        'in_progress',
+        'completed',
+        'cancelled',
+        'closed'
+    )
+),
     constraint valid_priority check (
         priority in ('low', 'normal', 'high', 'urgent')
     )

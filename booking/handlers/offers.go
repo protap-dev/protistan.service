@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"time"
 
+	"encore.app/artisans"
 	"encore.app/booking/domain"
 	binternal "encore.app/booking/internal"
 	"encore.dev/beta/errs"
@@ -61,47 +62,69 @@ func (h *BookingsHandler) OfferBooking(ctx context.Context, bookingID string, re
 		return nil, fmt.Errorf("expires_in cannot exceed 72 hours")
 	}
 
-	// Create offer
-	offer := &domain.BookingOffer{
-		BookingID: bookingID,
-		ArtisanID: req.ArtisanID,
-		Status:    domain.OfferPending,
-		OfferedBy: userCtx.ID,
-		OfferedAt: time.Now(),
-		ExpiresAt: time.Now().Add(time.Duration(expiresIn) * time.Hour), // Default 24h expiration
-		CreatedAt: time.Now(),
-		UpdatedAt: time.Now(),
-	}
+	// Create offer and update booking status in transaction
+	var offer *domain.BookingOffer
 
-	if err := h.repo.CreateOffer(ctx, offer); err != nil {
-		h.logger.Error(ctx, "failed to create offer", err, map[string]any{
+	err = h.repo.WithTransaction(ctx, func(txRepo domain.BookingRepository) error {
+		// Create offer
+		offer = &domain.BookingOffer{
+			ID:        binternal.GenerateUUID(),
+			BookingID: bookingID,
+			ArtisanID: req.ArtisanID,
+			Status:    domain.OfferPending,
+			OfferedBy: userCtx.ID,
+			OfferedAt: time.Now(),
+			ExpiresAt: time.Now().Add(time.Duration(expiresIn) * time.Hour),
+			CreatedAt: time.Now(),
+			UpdatedAt: time.Now(),
+		}
+
+		if err := txRepo.CreateOffer(ctx, offer); err != nil {
+			return fmt.Errorf("failed to create offer: %w", err)
+		}
+
+		// Get fresh booking for status update
+		currentBooking, err := txRepo.GetByID(ctx, bookingID)
+		if err != nil {
+			return fmt.Errorf("failed to get booking: %w", err)
+		}
+
+		// Update booking status to OfferPending
+		currentBooking.Status = domain.BookingOfferPending
+		currentBooking.UpdatedAt = time.Now()
+		currentBooking.OffersCount++
+
+		if err := txRepo.Update(ctx, currentBooking); err != nil {
+			return fmt.Errorf("failed to update booking status: %w", err)
+		}
+
+		// Create event in outbox
+		event := &domain.BookingEvent{
+			BookingID:      bookingID,
+			Status:         domain.BookingOfferPending,
+			PreviousStatus: booking.Status,
+			Timestamp:      time.Now(),
+			UserID:         userCtx.ID,
+			ArtisanID:      &offer.ArtisanID,
+		}
+
+		if err := txRepo.CreateEventInOutbox(ctx, event); err != nil {
+			return fmt.Errorf("failed to create event: %w", err)
+		}
+
+		return nil
+	})
+
+	if err != nil {
+		h.logger.Error(ctx, "failed to create offer and update booking", err, map[string]any{
 			"booking_id": bookingID,
 			"artisan_id": req.ArtisanID,
 		})
-		return nil, fmt.Errorf("failed to create offer: %w", err)
+		return nil, err
 	}
 
-	// Update booking status to OfferPending
-	booking.Status = domain.BookingOfferPending
-	if err := h.repo.Update(ctx, booking); err != nil {
-		h.logger.Error(ctx, "failed to update booking status to OfferPending", err, map[string]any{
-			"booking_id": bookingID,
-			"status":     domain.BookingOfferPending,
-		})
-		// Log error but don't fail the offer creation
-	}
-
-	// Publish event
-	go func() {
-		backgroundCtx := context.Background()
-		h.publisher.PublishOfferCreatedEvent(backgroundCtx, &domain.BookingEvent{
-			BookingID: bookingID,
-			Status:    domain.BookingOfferPending,
-			Timestamp: time.Now(),
-			UserID:    userCtx.ID,
-			ArtisanID: &offer.ArtisanID,
-		})
-	}()
+	// Clear cache
+	h.cache.Delete(ctx, binternal.BookingCacheKey(bookingID))
 
 	h.logger.Info(ctx, "booking offered to artisan", map[string]any{
 		"booking_id": bookingID,
@@ -130,8 +153,29 @@ func (h *BookingsHandler) AcceptOffer(ctx context.Context, offerID string, req *
 		return nil, fmt.Errorf("failed to get offer: %w", err)
 	}
 
-	// Authorization: Only the artisan to whom the offer was made can accept it
-	if offer.ArtisanID != userCtx.ID {
+	// Authorization: Get artisan profile for current user
+	// The offer.ArtisanID is the artisan PROFILE ID, not the user ID
+	// We need to check if this user owns that artisan profile
+	userRole, err := h.getUserRole(ctx, userCtx.ID)
+	if err != nil {
+		return nil, err
+	}
+
+	if userRole != "artisan" {
+		return nil, binternal.ErrPermissionDenied
+	}
+
+	artisanResp, err := artisans.GetArtisanIDByUserID(ctx, userCtx.ID)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get artisan profile: %w", err)
+	}
+
+	if !artisanResp.Found {
+		return nil, fmt.Errorf("user is not an artisan")
+	}
+
+	// Now check if this artisan profile matches the offer
+	if offer.ArtisanID != artisanResp.ArtisanID {
 		return nil, binternal.ErrPermissionDenied
 	}
 
@@ -146,15 +190,18 @@ func (h *BookingsHandler) AcceptOffer(ctx context.Context, offerID string, req *
 		return nil, err
 	}
 
+	// Store previous status for event
+	previousStatus := booking.Status
+
 	// Accept offer within a transaction
 	var updatedBooking *domain.Booking
 	err = h.repo.WithTransaction(ctx, func(txRepo domain.BookingRepository) error {
 		// Re-check booking is not assigned (race condition check)
-		booking, err := txRepo.GetByID(ctx, offer.BookingID)
+		currentBooking, err := txRepo.GetByID(ctx, offer.BookingID)
 		if err != nil {
 			return err
 		}
-		if booking.ArtisanID != nil {
+		if currentBooking.ArtisanID != nil {
 			return domain.ErrOfferAlreadyTaken
 		}
 
@@ -163,12 +210,26 @@ func (h *BookingsHandler) AcceptOffer(ctx context.Context, offerID string, req *
 			return err
 		}
 
-		// Assign artisan to booking and update booking status to Assigned
-		booking.ArtisanID = &offer.ArtisanID
-		booking.Status = domain.BookingAssigned
-		booking.UpdatedAt = time.Now()
+		// Assign artisan to booking and update status
+		currentBooking.ArtisanID = &offer.ArtisanID
+		currentBooking.Status = domain.BookingAssigned
+		currentBooking.UpdatedAt = time.Now()
 
-		if err := txRepo.Update(ctx, booking); err != nil {
+		if err := txRepo.Update(ctx, currentBooking); err != nil {
+			return err
+		}
+
+		// Create assigned event in outbox (atomic with transaction)
+		assignedEvent := &domain.BookingEvent{
+			BookingID:      offer.BookingID,
+			Status:         domain.BookingAssigned,
+			PreviousStatus: previousStatus,
+			Timestamp:      time.Now(),
+			UserID:         userCtx.ID,
+			ArtisanID:      &offer.ArtisanID,
+		}
+
+		if err := txRepo.CreateEventInOutbox(ctx, assignedEvent); err != nil {
 			return err
 		}
 
@@ -178,7 +239,7 @@ func (h *BookingsHandler) AcceptOffer(ctx context.Context, offerID string, req *
 			// Don't fail the transaction for this
 		}
 
-		updatedBooking = booking
+		updatedBooking = currentBooking
 		return nil
 	})
 
@@ -189,32 +250,6 @@ func (h *BookingsHandler) AcceptOffer(ctx context.Context, offerID string, req *
 		})
 		return nil, fmt.Errorf("failed to accept offer: %w", err)
 	}
-
-	// Publish events
-	go func() {
-		backgroundCtx := context.Background()
-
-		// Publish assigned event
-		assignedEvent := &domain.BookingEvent{
-			BookingID: offer.BookingID,
-			Status:    domain.BookingAssigned,
-			Timestamp: time.Now(),
-			UserID:    userCtx.ID,
-			ArtisanID: &offer.ArtisanID,
-		}
-		h.publisher.PublishAssignedEvent(backgroundCtx, assignedEvent)
-
-		// Publish status event
-		statusEvent := &domain.BookingEvent{
-			BookingID:      offer.BookingID,
-			Status:         domain.BookingAssigned,
-			PreviousStatus: domain.BookingOfferPending,
-			Timestamp:      time.Now(),
-			UserID:         userCtx.ID,
-			ArtisanID:      &offer.ArtisanID,
-		}
-		h.publisher.PublishStatusEvent(backgroundCtx, statusEvent)
-	}()
 
 	// Clear cache
 	h.cache.Delete(ctx, binternal.BookingCacheKey(offer.BookingID))
@@ -261,21 +296,46 @@ func (h *BookingsHandler) RejectOffer(ctx context.Context, offerID string, req *
 		return nil, err
 	}
 
-	// Update offer status and booking status to OfferRejected
+	// Update offer status and booking status atomically with event
+	var updatedOffer *domain.BookingOffer
 	err = h.repo.WithTransaction(ctx, func(txRepo domain.BookingRepository) error {
+		// Update offer status
 		if err := txRepo.UpdateOfferStatus(ctx, offerID, domain.OfferRejected, &req.Reason); err != nil {
 			return err
 		}
+
+		// Get and update booking
 		booking, err := txRepo.GetByID(ctx, offer.BookingID)
 		if err != nil {
 			return err
 		}
+
+		previousStatus := booking.Status
 		booking.Status = domain.BookingOfferRejected
 		booking.UpdatedAt = time.Now()
+
 		if err := txRepo.Update(ctx, booking); err != nil {
 			return err
 		}
-		return nil
+
+		// Create event in outbox (atomic with transaction)
+		event := &domain.BookingEvent{
+			BookingID:      offer.BookingID,
+			Status:         domain.BookingOfferRejected,
+			PreviousStatus: previousStatus,
+			Timestamp:      time.Now(),
+			UserID:         userCtx.ID,
+			ArtisanID:      &offer.ArtisanID,
+			Reason:         &req.Reason,
+		}
+
+		if err := txRepo.CreateEventInOutbox(ctx, event); err != nil {
+			return err
+		}
+
+		// Get updated offer for response
+		updatedOffer, err = txRepo.GetOfferByID(ctx, offerID)
+		return err
 	})
 
 	if err != nil {
@@ -285,26 +345,8 @@ func (h *BookingsHandler) RejectOffer(ctx context.Context, offerID string, req *
 		return nil, fmt.Errorf("failed to reject offer: %w", err)
 	}
 
-	// Re-fetch updated offer
-	offer, err = h.repo.GetOfferByID(ctx, offerID)
-	if err != nil {
-		return nil, fmt.Errorf("failed to get updated offer: %w", err)
-	}
-
-	// Publish event
-	go func() {
-		backgroundCtx := context.Background()
-		event := &domain.BookingEvent{
-			BookingID:      offer.BookingID,
-			Status:         domain.BookingOfferRejected,
-			PreviousStatus: domain.BookingOfferPending,
-			Timestamp:      time.Now(),
-			UserID:         userCtx.ID,
-			ArtisanID:      &offer.ArtisanID,
-			Reason:         &req.Reason,
-		}
-		h.publisher.PublishStatusEvent(backgroundCtx, event)
-	}()
+	// Clear cache
+	h.cache.Delete(ctx, binternal.BookingCacheKey(offer.BookingID))
 
 	h.logger.Info(ctx, "offer rejected", map[string]any{
 		"offer_id":   offerID,
@@ -312,7 +354,7 @@ func (h *BookingsHandler) RejectOffer(ctx context.Context, offerID string, req *
 		"reason":     req.Reason,
 	})
 
-	return h.toOfferResponse(offer), nil
+	return h.toOfferResponse(updatedOffer), nil
 }
 
 // ListBookingOffers lists all offers for a specific booking
