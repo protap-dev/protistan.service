@@ -5,64 +5,44 @@ import (
 	"encore.dev/pubsub"
 )
 
-// Topics now publish EventEnvelope instead of raw BookingEvent
+// Topics that BOOKING SERVICE owns and publishes
 var (
-	// StatusTopic publishes all booking status change events wrapped in envelope
+	// StatusTopic publishes all booking status change events
 	StatusTopic = pubsub.NewTopic[*EventEnvelope[domain.BookingEvent]]("booking-status", pubsub.TopicConfig{
 		DeliveryGuarantee: pubsub.AtLeastOnce,
 	})
 
-	// CreatedTopic publishes booking creation events wrapped in envelope
+	// CreatedTopic publishes booking creation events
 	CreatedTopic = pubsub.NewTopic[*EventEnvelope[domain.BookingEvent]]("booking-created", pubsub.TopicConfig{
 		DeliveryGuarantee: pubsub.AtLeastOnce,
 	})
 
-	// CancelledTopic publishes booking cancellation events wrapped in envelope
+	// CancelledTopic publishes booking cancellation events
 	CancelledTopic = pubsub.NewTopic[*EventEnvelope[domain.BookingEvent]]("booking-cancelled", pubsub.TopicConfig{
 		DeliveryGuarantee: pubsub.AtLeastOnce,
 	})
 
-	// OfferedTopic publishes booking offer events wrapped in envelope
+	// OfferedTopic publishes booking offer events
 	OfferedTopic = pubsub.NewTopic[*EventEnvelope[domain.BookingEvent]]("booking-offered", pubsub.TopicConfig{
 		DeliveryGuarantee: pubsub.AtLeastOnce,
 	})
 
-	// AssignedTopic publishes booking assignment events wrapped in envelope
+	// AssignedTopic publishes booking assignment events
 	AssignedTopic = pubsub.NewTopic[*EventEnvelope[domain.BookingEvent]]("booking-assigned", pubsub.TopicConfig{
 		DeliveryGuarantee: pubsub.AtLeastOnce,
 	})
 
-	// QuoteAcceptedTopic publishes quote acceptance events wrapped in envelope
-	QuoteAcceptedTopic = pubsub.NewTopic[*EventEnvelope[domain.BookingEvent]]("booking-quote-accepted", pubsub.TopicConfig{
-		DeliveryGuarantee: pubsub.AtLeastOnce,
-	})
-
-	// QuoteRejectedTopic publishes quote rejection events wrapped in envelope
-	QuoteRejectedTopic = pubsub.NewTopic[*EventEnvelope[domain.BookingEvent]]("booking-quote-rejected", pubsub.TopicConfig{
-		DeliveryGuarantee: pubsub.AtLeastOnce,
-	})
-
-	// PaymentConfirmedTopic publishes payment confirmation events wrapped in envelope
-	PaymentConfirmedTopic = pubsub.NewTopic[*EventEnvelope[domain.BookingEvent]]("booking-payment-confirmed", pubsub.TopicConfig{
-		DeliveryGuarantee: pubsub.AtLeastOnce,
-	})
-
-	// PaymentFailedTopic publishes payment failure events (external topic from payment service)
-	PaymentFailedTopic = pubsub.NewTopic[*EventEnvelope[domain.BookingEvent]]("payment-failed", pubsub.TopicConfig{
-		DeliveryGuarantee: pubsub.AtLeastOnce,
-	})
-
-	// OfferRejectedTopic publishes offer rejection events wrapped in envelope
+	// OfferRejectedTopic publishes offer rejection events
 	OfferRejectedTopic = pubsub.NewTopic[*EventEnvelope[domain.BookingEvent]]("booking-offer-rejected", pubsub.TopicConfig{
 		DeliveryGuarantee: pubsub.AtLeastOnce,
 	})
 
-	// OfferExpiredTopic publishes offer expiration events wrapped in envelope
+	// OfferExpiredTopic publishes offer expiration events
 	OfferExpiredTopic = pubsub.NewTopic[*EventEnvelope[domain.BookingEvent]]("booking-offer-expired", pubsub.TopicConfig{
 		DeliveryGuarantee: pubsub.AtLeastOnce,
 	})
 
-	// RematchTopic publishes rematch request events wrapped in envelope
+	// RematchTopic publishes rematch request events
 	RematchTopic = pubsub.NewTopic[*EventEnvelope[domain.RematchEvent]]("booking-rematch", pubsub.TopicConfig{
 		DeliveryGuarantee: pubsub.AtLeastOnce,
 	})

@@ -11,6 +11,9 @@ import (
 	"encore.app/booking/repository"
 	"encore.app/core"
 	"encore.app/core/cache"
+	eventscommon "encore.app/core/events"
+	"encore.app/payment"
+	"encore.app/quote"
 	"encore.dev/cron"
 	"encore.dev/pubsub"
 	"encore.dev/storage/sqldb"
@@ -74,6 +77,11 @@ func initService() (*Service, error) {
 	return svc, nil
 }
 
+//encore:api auth method=POST path=/v0/bookings
+func (s *Service) CreateBooking(ctx context.Context, req *handlers.CreateBookingRequest) (*handlers.BookingResponse, error) {
+	return s.bookingsHandler.CreateBooking(ctx, req)
+}
+
 //encore:api auth method=PUT path=/v0/bookings/:id/status
 func (s *Service) UpdateBookingStatus(ctx context.Context, id string, req *handlers.UpdateStatusRequest) (*handlers.BookingResponse, error) {
 	return s.bookingsHandler.UpdateBookingStatus(ctx, id, req)
@@ -133,29 +141,12 @@ func (s *Service) ListArtisanOffers(ctx context.Context, params *handlers.ListOf
 // =============================
 
 var _ = pubsub.NewSubscription(
-	events.QuoteAcceptedTopic, "handle-quote-accepted",
-	pubsub.SubscriptionConfig[*events.EventEnvelope[domain.BookingEvent]]{
-		Handler: func(ctx context.Context, envelope *events.EventEnvelope[domain.BookingEvent]) error {
-			// Propagate correlation/causation from envelope to context
-			ctx = events.WithEventMetadata(ctx, &events.EventMetadata{
-				CorrelationID: envelope.CorrelationID,
-				CausationID:   envelope.EventID, // This event becomes the cause of next event
-				UserID:        envelope.Data.UserID,
-			})
+	quote.QuoteAcceptedTopic, "handle-quote-accepted",
+	pubsub.SubscriptionConfig[*eventscommon.EventEnvelope[eventscommon.BookingEvent]]{
+		Handler: func(ctx context.Context, envelope *eventscommon.EventEnvelope[eventscommon.BookingEvent]) error {
+			// Convert to domain event
+			domainEvent := convertToDomainEvent(&envelope.Data)
 
-			s, err := initService()
-			if err != nil {
-				return err
-			}
-			return s.OnQuoteAccepted(ctx, &envelope.Data)
-		},
-	},
-)
-
-var _ = pubsub.NewSubscription(
-	events.QuoteRejectedTopic, "handle-quote-rejected",
-	pubsub.SubscriptionConfig[*events.EventEnvelope[domain.BookingEvent]]{
-		Handler: func(ctx context.Context, envelope *events.EventEnvelope[domain.BookingEvent]) error {
 			ctx = events.WithEventMetadata(ctx, &events.EventMetadata{
 				CorrelationID: envelope.CorrelationID,
 				CausationID:   envelope.EventID,
@@ -166,15 +157,17 @@ var _ = pubsub.NewSubscription(
 			if err != nil {
 				return err
 			}
-			return s.OnQuoteRejected(ctx, &envelope.Data)
+			return s.OnQuoteAccepted(ctx, domainEvent)
 		},
 	},
 )
 
 var _ = pubsub.NewSubscription(
-	events.PaymentConfirmedTopic, "handle-payment-confirmed",
-	pubsub.SubscriptionConfig[*events.EventEnvelope[domain.BookingEvent]]{
-		Handler: func(ctx context.Context, envelope *events.EventEnvelope[domain.BookingEvent]) error {
+	quote.QuoteRejectedTopic, "handle-quote-rejected",
+	pubsub.SubscriptionConfig[*eventscommon.EventEnvelope[eventscommon.BookingEvent]]{
+		Handler: func(ctx context.Context, envelope *eventscommon.EventEnvelope[eventscommon.BookingEvent]) error {
+			domainEvent := convertToDomainEvent(&envelope.Data)
+
 			ctx = events.WithEventMetadata(ctx, &events.EventMetadata{
 				CorrelationID: envelope.CorrelationID,
 				CausationID:   envelope.EventID,
@@ -185,15 +178,17 @@ var _ = pubsub.NewSubscription(
 			if err != nil {
 				return err
 			}
-			return s.OnPaymentConfirmed(ctx, &envelope.Data)
+			return s.OnQuoteRejected(ctx, domainEvent)
 		},
 	},
 )
 
 var _ = pubsub.NewSubscription(
-	events.PaymentFailedTopic, "handle-payment-failed",
-	pubsub.SubscriptionConfig[*events.EventEnvelope[domain.BookingEvent]]{
-		Handler: func(ctx context.Context, envelope *events.EventEnvelope[domain.BookingEvent]) error {
+	payment.PaymentConfirmedTopic, "handle-payment-confirmed",
+	pubsub.SubscriptionConfig[*eventscommon.EventEnvelope[eventscommon.BookingEvent]]{
+		Handler: func(ctx context.Context, envelope *eventscommon.EventEnvelope[eventscommon.BookingEvent]) error {
+			domainEvent := convertToDomainEvent(&envelope.Data)
+
 			ctx = events.WithEventMetadata(ctx, &events.EventMetadata{
 				CorrelationID: envelope.CorrelationID,
 				CausationID:   envelope.EventID,
@@ -204,7 +199,28 @@ var _ = pubsub.NewSubscription(
 			if err != nil {
 				return err
 			}
-			return s.OnPaymentFailed(ctx, &envelope.Data)
+			return s.OnPaymentConfirmed(ctx, domainEvent)
+		},
+	},
+)
+
+var _ = pubsub.NewSubscription(
+	payment.PaymentFailedTopic, "handle-payment-failed",
+	pubsub.SubscriptionConfig[*eventscommon.EventEnvelope[eventscommon.BookingEvent]]{
+		Handler: func(ctx context.Context, envelope *eventscommon.EventEnvelope[eventscommon.BookingEvent]) error {
+			domainEvent := convertToDomainEvent(&envelope.Data)
+
+			ctx = events.WithEventMetadata(ctx, &events.EventMetadata{
+				CorrelationID: envelope.CorrelationID,
+				CausationID:   envelope.EventID,
+				UserID:        envelope.Data.UserID,
+			})
+
+			s, err := initService()
+			if err != nil {
+				return err
+			}
+			return s.OnPaymentFailed(ctx, domainEvent)
 		},
 	},
 )
@@ -216,6 +232,19 @@ var _ = pubsub.NewSubscription(
 //         Handler: pubsub.MethodHandler((*Service).OnQuoteProposed),
 //     },
 // )
+
+// Helper function to convert common event to domain event
+func convertToDomainEvent(commonEvent *eventscommon.BookingEvent) *domain.BookingEvent {
+	return &domain.BookingEvent{
+		BookingID:      commonEvent.BookingID,
+		Status:         domain.BookingStatus(commonEvent.Status),
+		PreviousStatus: domain.BookingStatus(commonEvent.PreviousStatus),
+		Timestamp:      commonEvent.Timestamp,
+		UserID:         commonEvent.UserID,
+		ArtisanID:      commonEvent.ArtisanID,
+		Reason:         commonEvent.Reason,
+	}
+}
 
 func (s *Service) OnQuoteProposed(ctx context.Context, event *domain.BookingEvent) error {
 	current, err := s.bookingsHandler.GetRepository().GetByID(ctx, event.BookingID)

@@ -35,14 +35,11 @@ func (p *DefaultPublisher) PublishToTopic(ctx context.Context, outboxEvent *repo
 	case "booking.assigned":
 		_, err := events.AssignedTopic.Publish(ctx, events.CreateEventEnvelope(ctx, "booking.assigned", *event))
 		return err
-	case "booking.quote.accepted":
-		_, err := events.QuoteAcceptedTopic.Publish(ctx, events.CreateEventEnvelope(ctx, "booking.quote.accepted", *event))
+	case "booking.offer.rejected":
+		_, err := events.OfferRejectedTopic.Publish(ctx, events.CreateEventEnvelope(ctx, "booking.offer.rejected", *event))
 		return err
-	case "booking.quote.rejected":
-		_, err := events.QuoteRejectedTopic.Publish(ctx, events.CreateEventEnvelope(ctx, "booking.quote.rejected", *event))
-		return err
-	case "booking.payment.confirmed":
-		_, err := events.PaymentConfirmedTopic.Publish(ctx, events.CreateEventEnvelope(ctx, "booking.payment.confirmed", *event))
+	case "booking.v1.offer.expired":
+		_, err := events.OfferExpiredTopic.Publish(ctx, events.CreateEventEnvelope(ctx, "booking.v1.offer.expired", *event))
 		return err
 	default:
 		// Default to status topic for unknown topic names

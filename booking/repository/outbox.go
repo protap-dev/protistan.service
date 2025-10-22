@@ -61,16 +61,6 @@ func getTopicForEvent(event *domain.BookingEvent) string {
 		return "booking.assigned"
 	case domain.BookingPendingQuote:
 		return "booking.status"
-	case domain.BookingQuoteProposed:
-		return "booking.status"
-	case domain.BookingQuoteAccepted:
-		return "booking.quote.accepted"
-	case domain.BookingQuoteRejected:
-		return "booking.quote.rejected"
-	case domain.BookingPaymentPending:
-		return "booking.status"
-	case domain.BookingConfirmed:
-		return "booking.payment.confirmed"
 	case domain.BookingEnroute:
 		return "booking.status"
 	case domain.BookingInProgress:

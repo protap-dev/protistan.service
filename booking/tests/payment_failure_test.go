@@ -297,11 +297,5 @@ func (m *mockPaymentPublisher) PublishAssignedEvent(ctx context.Context, event *
 }
 func (m *mockPaymentPublisher) PublishOfferRejectedEvent(ctx context.Context, event *domain.BookingEvent) {
 }
-func (m *mockPaymentPublisher) PublishQuoteAcceptedEvent(ctx context.Context, event *domain.BookingEvent) {
-}
-func (m *mockPaymentPublisher) PublishQuoteRejectedEvent(ctx context.Context, event *domain.BookingEvent) {
-}
-func (m *mockPaymentPublisher) PublishPaymentConfirmedEvent(ctx context.Context, event *domain.BookingEvent) {
-}
 func (m *mockPaymentPublisher) PublishRematchRequestedEvent(ctx context.Context, event *domain.RematchEvent) {
 }

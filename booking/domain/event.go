@@ -42,11 +42,6 @@ type EventPublisher interface {
 	PublishAssignedEvent(ctx context.Context, event *BookingEvent)
 	PublishOfferRejectedEvent(ctx context.Context, event *BookingEvent)
 
-	// Quote and payment events
-	PublishQuoteAcceptedEvent(ctx context.Context, event *BookingEvent)
-	PublishQuoteRejectedEvent(ctx context.Context, event *BookingEvent)
-	PublishPaymentConfirmedEvent(ctx context.Context, event *BookingEvent)
-
 	// Rematch events
 	PublishRematchRequestedEvent(ctx context.Context, event *RematchEvent)
 }

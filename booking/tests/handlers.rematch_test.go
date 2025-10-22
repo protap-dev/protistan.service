@@ -69,10 +69,6 @@ func (m *mockPublisher) PublishCancelledEvent(ctx context.Context, event *domain
 func (m *mockPublisher) PublishOfferCreatedEvent(ctx context.Context, event *domain.BookingEvent)  {}
 func (m *mockPublisher) PublishAssignedEvent(ctx context.Context, event *domain.BookingEvent)      {}
 func (m *mockPublisher) PublishOfferRejectedEvent(ctx context.Context, event *domain.BookingEvent) {}
-func (m *mockPublisher) PublishQuoteAcceptedEvent(ctx context.Context, event *domain.BookingEvent) {}
-func (m *mockPublisher) PublishQuoteRejectedEvent(ctx context.Context, event *domain.BookingEvent) {}
-func (m *mockPublisher) PublishPaymentConfirmedEvent(ctx context.Context, event *domain.BookingEvent) {
-}
 
 func (m *mockPublisher) PublishRematchRequestedEvent(ctx context.Context, event *domain.RematchEvent) {
 	m.publishedRematchEvents = append(m.publishedRematchEvents, event)

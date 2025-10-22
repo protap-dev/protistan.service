@@ -417,10 +417,6 @@ func (h *BookingsHandler) UpdateBookingStatusInternal(ctx context.Context, booki
 	var previousStatus domain.BookingStatus
 
 	err := h.repo.WithTransaction(ctx, func(txRepo domain.BookingRepository) error {
-		// Use the passed current booking instead of fetching it again
-		// current, err := txRepo.GetByID(ctx, bookingID)  // Remove this line
-
-		// Store previous status for event publishing
 		previousStatus = current.Status
 		current.Status = newStatus
 		current.UpdatedAt = time.Now()
@@ -433,7 +429,7 @@ func (h *BookingsHandler) UpdateBookingStatusInternal(ctx context.Context, booki
 			return binternal.ErrDatabaseError
 		}
 
-		// Create main status change event
+		// The outbox relay will publish this to the appropriate topic based on status
 		statusEvent := &domain.BookingEvent{
 			BookingID:      bookingID,
 			Status:         newStatus,
@@ -444,52 +440,9 @@ func (h *BookingsHandler) UpdateBookingStatusInternal(ctx context.Context, booki
 			Reason:         reason,
 		}
 
-		// Write main status event to outbox
+		// Write event to outbox - ONE event per status change
 		if err := txRepo.CreateEventInOutbox(ctx, statusEvent); err != nil {
 			return err
-		}
-
-		// Publish additional events based on new status (all atomic within transaction)
-		switch newStatus {
-		case domain.BookingQuoteAccepted:
-			quoteEvent := &domain.BookingEvent{
-				BookingID:      bookingID,
-				Status:         newStatus,
-				PreviousStatus: previousStatus,
-				Timestamp:      time.Now(),
-				UserID:         userID,
-				ArtisanID:      current.ArtisanID,
-				Reason:         reason,
-			}
-			if err := txRepo.CreateEventInOutbox(ctx, quoteEvent); err != nil {
-				return err
-			}
-		case domain.BookingConfirmed:
-			paymentEvent := &domain.BookingEvent{
-				BookingID:      bookingID,
-				Status:         newStatus,
-				PreviousStatus: previousStatus,
-				Timestamp:      time.Now(),
-				UserID:         userID,
-				ArtisanID:      current.ArtisanID,
-				Reason:         reason,
-			}
-			if err := txRepo.CreateEventInOutbox(ctx, paymentEvent); err != nil {
-				return err
-			}
-		case domain.BookingCancelled:
-			cancelledEvent := &domain.BookingEvent{
-				BookingID:      bookingID,
-				Status:         newStatus,
-				PreviousStatus: previousStatus,
-				Timestamp:      time.Now(),
-				UserID:         userID,
-				ArtisanID:      current.ArtisanID,
-				Reason:         reason,
-			}
-			if err := txRepo.CreateEventInOutbox(ctx, cancelledEvent); err != nil {
-				return err
-			}
 		}
 
 		return nil

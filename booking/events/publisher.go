@@ -70,33 +70,6 @@ func (e *eventPublisher) PublishOfferRejectedEvent(ctx context.Context, event *d
 	}
 }
 
-// PublishQuoteAcceptedEvent publishes when a quote is accepted.
-func (e *eventPublisher) PublishQuoteAcceptedEvent(ctx context.Context, event *domain.BookingEvent) {
-	envelope := CreateEventEnvelope(ctx, "booking.quote.accepted", *event)
-	_, err := QuoteAcceptedTopic.Publish(ctx, envelope)
-	if err != nil {
-		log.Printf("ERROR: failed to publish quote accepted event: %v", err)
-	}
-}
-
-// PublishQuoteRejectedEvent publishes when a quote is rejected.
-func (e *eventPublisher) PublishQuoteRejectedEvent(ctx context.Context, event *domain.BookingEvent) {
-	envelope := CreateEventEnvelope(ctx, "booking.quote.rejected", *event)
-	_, err := QuoteRejectedTopic.Publish(ctx, envelope)
-	if err != nil {
-		log.Printf("ERROR: failed to publish quote rejected event: %v", err)
-	}
-}
-
-// PublishPaymentConfirmedEvent publishes when payment is confirmed.
-func (e *eventPublisher) PublishPaymentConfirmedEvent(ctx context.Context, event *domain.BookingEvent) {
-	envelope := CreateEventEnvelope(ctx, "booking.payment.confirmed", *event)
-	_, err := PaymentConfirmedTopic.Publish(ctx, envelope)
-	if err != nil {
-		log.Printf("ERROR: failed to publish payment confirmed event: %v", err)
-	}
-}
-
 // PublishRematchRequestedEvent publishes when a customer requests a rematch.
 func (e *eventPublisher) PublishRematchRequestedEvent(ctx context.Context, event *domain.RematchEvent) {
 	envelope := CreateEventEnvelope(ctx, "booking.v1.rematch.requested", *event)
