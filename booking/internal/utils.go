@@ -31,7 +31,8 @@ func BookingCacheKey(id string) string {
 
 // GenerateUUID generates a new UUID using Google UUID library
 func GenerateUUID() string {
-	return uuid.New().String()
+	newuid, _ := uuid.NewV7()
+	return newuid.String()
 }
 
 // GenerateRandomID generates a random 16-byte ID encoded as hex string

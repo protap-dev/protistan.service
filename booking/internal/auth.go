@@ -4,17 +4,10 @@ import (
 	"context"
 	"net/http"
 
+	eventscommon "encore.app/core/events"
 	"encore.dev/beta/auth"
 	"encore.dev/types/uuid"
 )
-
-// EventMetadata contains request tracing information for event correlation
-type EventMetadata struct {
-	CorrelationID string
-	CausationID   string
-	UserID        string
-	RequestID     string
-}
 
 // UserContext extends the basic user context with event metadata
 type UserContext struct {
@@ -23,12 +16,7 @@ type UserContext struct {
 	Metadata *EventMetadata
 }
 
-// ContextKey for storing event metadata in context
-type contextKey string
-
-const (
-	metadataKey contextKey = "event_metadata"
-)
+type EventMetadata = eventscommon.EventMetadata
 
 // AuthHelper handles authentication and request metadata extraction
 type AuthHelper struct {
@@ -50,7 +38,7 @@ func (h *AuthHelper) ExtractUserContext(ctx context.Context, action string) (*Us
 	userIDStr := string(userID)
 
 	// Extract correlation/causation IDs from HTTP headers if available
-	metadata := h.extractEventMetadata(ctx, userIDStr)
+	metadata, _ := eventscommon.ExtractEventMetadata(ctx)
 
 	h.logger.Info(ctx, action, map[string]any{
 		"user_id":        userIDStr,
@@ -70,61 +58,6 @@ func (h *AuthHelper) ExtractUserContext(ctx context.Context, action string) (*Us
 		UUID:     userUUID,
 		Metadata: metadata,
 	}, nil
-}
-
-// ExtractEventMetadata extracts event metadata from context (for internal use)
-func ExtractEventMetadata(ctx context.Context) (*EventMetadata, bool) {
-	metadata, ok := ctx.Value(metadataKey).(*EventMetadata)
-	return metadata, ok
-}
-
-// WithEventMetadata adds event metadata to context
-func WithEventMetadata(ctx context.Context, metadata *EventMetadata) context.Context {
-	return context.WithValue(ctx, metadataKey, metadata)
-}
-
-// extractEventMetadata extracts correlation/causation IDs from HTTP headers
-func (h *AuthHelper) extractEventMetadata(ctx context.Context, userID string) *EventMetadata {
-	// Generate new correlation ID if not present
-	correlationID := GenerateRandomID()
-	causationID := GenerateRandomID()
-	requestID := GenerateRandomID()
-
-	// Try to extract from HTTP headers if available
-	if req, ok := ctx.Value("http_request").(*http.Request); ok {
-		// Extract correlation ID from headers
-		if corrID := req.Header.Get("X-Correlation-ID"); corrID != "" {
-			correlationID = corrID
-		}
-
-		// Extract causation ID from headers
-		if causeID := req.Header.Get("X-Causation-ID"); causeID != "" {
-			causationID = causeID
-		}
-
-		// Extract request ID from headers or generate
-		if reqID := req.Header.Get("X-Request-ID"); reqID != "" {
-			requestID = reqID
-		} else {
-			// Generate request ID based on correlation ID if not provided
-			requestID = correlationID
-		}
-	}
-
-	return &EventMetadata{
-		CorrelationID: correlationID,
-		CausationID:   causationID,
-		UserID:        userID,
-		RequestID:     requestID,
-	}
-}
-
-// GetEventMetadata creates event metadata for the current request context
-func GetEventMetadata(ctx context.Context) *EventMetadata {
-	if metadata, ok := ExtractEventMetadata(ctx); ok {
-		return metadata
-	}
-	return nil
 }
 
 // ExtractMetadataFromHTTPRequest extracts event metadata from HTTP request headers

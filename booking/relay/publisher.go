@@ -8,6 +8,10 @@ import (
 	"encore.app/core/repository"
 )
 
+const (
+	producer string = "booking-service"
+)
+
 // BookingEvent implements the core EventData interface
 // This makes BookingEvent compatible with the core relay system
 type BookingEvent struct {

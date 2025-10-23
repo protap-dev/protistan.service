@@ -6,7 +6,7 @@ import (
 	"time"
 
 	eventscommon "encore.app/core/events"
-	"encore.dev/pubsub"
+	topics_payment "encore.app/core/events/topics/payment"
 )
 
 //encore:service
@@ -33,13 +33,9 @@ type PaymentResponse struct {
 }
 
 // Topics - Payment service OWNS these topics
-var PaymentConfirmedTopic = pubsub.NewTopic[*eventscommon.EventEnvelope[eventscommon.BookingEvent]]("payment-v1-confirmed", pubsub.TopicConfig{
-	DeliveryGuarantee: pubsub.AtLeastOnce,
-})
+var PaymentConfirmedTopic = topics_payment.PaymentConfirmedTopic
 
-var PaymentFailedTopic = pubsub.NewTopic[*eventscommon.EventEnvelope[eventscommon.BookingEvent]]("payment-v1-failed", pubsub.TopicConfig{
-	DeliveryGuarantee: pubsub.AtLeastOnce,
-})
+var PaymentFailedTopic = topics_payment.PaymentFailedTopic
 
 // CreatePayment processes a payment
 //
