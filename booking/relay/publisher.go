@@ -5,45 +5,52 @@ import (
 
 	"encore.app/booking/domain"
 	"encore.app/booking/events"
-	"encore.app/booking/repository"
+	"encore.app/core/repository"
 )
 
-// Publisher handles publishing events to appropriate topics
-type Publisher interface {
-	PublishToTopic(ctx context.Context, outboxEvent *repository.OutboxEvent, event *domain.BookingEvent) error
+// BookingEvent implements the core EventData interface
+// This makes BookingEvent compatible with the core relay system
+type BookingEvent struct {
+	domain.BookingEvent
 }
 
-// DefaultPublisher implements the Publisher interface
-type DefaultPublisher struct{}
+// EventType returns the event type for routing
+func (e BookingEvent) EventType() string {
+	// This could be enhanced to return different types based on the event
+	return "booking"
+}
 
-// PublishToTopic publishes the event to the correct topic based on the stored topic name in outbox
-func (p *DefaultPublisher) PublishToTopic(ctx context.Context, outboxEvent *repository.OutboxEvent, event *domain.BookingEvent) error {
+// BookingPublisher implements the core relay Publisher interface for booking events
+type BookingPublisher struct{}
+
+// PublishToTopic publishes the booking event to the correct topic based on the stored topic name in outbox
+func (p *BookingPublisher) PublishToTopic(ctx context.Context, outboxEvent *repository.OutboxEvent, event BookingEvent) error {
 	// Use the stored topic name from outbox table for routing
 	switch outboxEvent.Topic {
 	case "booking.status":
-		_, err := events.StatusTopic.Publish(ctx, events.CreateEventEnvelope(ctx, "booking.status", *event))
+		_, err := events.StatusTopic.Publish(ctx, events.CreateEventEnvelope(ctx, "booking.status", event.BookingEvent))
 		return err
 	case "booking.created":
-		_, err := events.CreatedTopic.Publish(ctx, events.CreateEventEnvelope(ctx, "booking.created", *event))
+		_, err := events.CreatedTopic.Publish(ctx, events.CreateEventEnvelope(ctx, "booking.created", event.BookingEvent))
 		return err
 	case "booking.cancelled":
-		_, err := events.CancelledTopic.Publish(ctx, events.CreateEventEnvelope(ctx, "booking.cancelled", *event))
+		_, err := events.CancelledTopic.Publish(ctx, events.CreateEventEnvelope(ctx, "booking.cancelled", event.BookingEvent))
 		return err
 	case "booking.offered":
-		_, err := events.OfferedTopic.Publish(ctx, events.CreateEventEnvelope(ctx, "booking.offered", *event))
+		_, err := events.OfferedTopic.Publish(ctx, events.CreateEventEnvelope(ctx, "booking.offered", event.BookingEvent))
 		return err
 	case "booking.assigned":
-		_, err := events.AssignedTopic.Publish(ctx, events.CreateEventEnvelope(ctx, "booking.assigned", *event))
+		_, err := events.AssignedTopic.Publish(ctx, events.CreateEventEnvelope(ctx, "booking.assigned", event.BookingEvent))
 		return err
 	case "booking.offer.rejected":
-		_, err := events.OfferRejectedTopic.Publish(ctx, events.CreateEventEnvelope(ctx, "booking.offer.rejected", *event))
+		_, err := events.OfferRejectedTopic.Publish(ctx, events.CreateEventEnvelope(ctx, "booking.offer.rejected", event.BookingEvent))
 		return err
 	case "booking.v1.offer.expired":
-		_, err := events.OfferExpiredTopic.Publish(ctx, events.CreateEventEnvelope(ctx, "booking.v1.offer.expired", *event))
+		_, err := events.OfferExpiredTopic.Publish(ctx, events.CreateEventEnvelope(ctx, "booking.v1.offer.expired", event.BookingEvent))
 		return err
 	default:
 		// Default to status topic for unknown topic names
-		_, err := events.StatusTopic.Publish(ctx, events.CreateEventEnvelope(ctx, "booking.status", *event))
+		_, err := events.StatusTopic.Publish(ctx, events.CreateEventEnvelope(ctx, "booking.status", event.BookingEvent))
 		return err
 	}
 }

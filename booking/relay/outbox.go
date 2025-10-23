@@ -3,7 +3,7 @@ package relay
 import (
 	"context"
 
-	"encore.app/booking/domain"
+	corerelay "encore.app/core/relay"
 	"gorm.io/gorm"
 )
 
@@ -13,20 +13,15 @@ type OutboxRelay struct {
 }
 
 // NewOutboxRelay creates a new outbox relay instance using the modular architecture
-func NewOutboxRelay(db *gorm.DB, publisher domain.EventPublisher, config ...Config) *OutboxRelay {
+func NewOutboxRelay(db *gorm.DB, config ...corerelay.Config) *OutboxRelay {
 	// Use centralized configuration if none provided
-	cfg := DefaultConfig()
+	cfg := corerelay.DefaultConfig()
 	if len(config) > 0 {
 		cfg = config[0]
 	}
 
-	// Create modular components
-	publisherImpl := &DefaultPublisher{}
-	processorImpl := &DefaultProcessor{}
-	cleanupImpl := &DefaultCleanup{}
-
 	// Create the main relay orchestrator
-	relayInstance := NewRelay(db, publisherImpl, processorImpl, cleanupImpl, cfg)
+	relayInstance := NewRelay(db, cfg)
 
 	return &OutboxRelay{
 		relay: relayInstance,
@@ -44,7 +39,7 @@ func (r *OutboxRelay) Stop() {
 }
 
 // GetMetrics returns current relay metrics (thread-safe)
-func (r *OutboxRelay) GetMetrics() MetricsSnapshot {
+func (r *OutboxRelay) GetMetrics() corerelay.MetricsSnapshot {
 	return r.relay.GetMetrics()
 }
 

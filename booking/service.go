@@ -13,6 +13,7 @@ import (
 	"encore.app/core"
 	"encore.app/core/cache"
 	eventscommon "encore.app/core/events"
+	corerelay "encore.app/core/relay"
 	"encore.app/payment"
 	"encore.app/quote"
 	"encore.dev/cron"
@@ -66,7 +67,7 @@ func initService() (*Service, error) {
 		bookingsHandler := handlers.NewBookingsHandler(repo, validator, offerValidator, logger, cache, coreSvc, authHelper, publisher)
 
 		// Initialize outbox relay
-		relayConfig := relay.Config{
+		relayConfig := corerelay.Config{
 			PollingInterval: binternal.DefaultOutboxRelayConfig().PollingInterval,
 			BatchSize:       binternal.DefaultOutboxRelayConfig().BatchSize,
 			MaxRetries:      binternal.DefaultOutboxRelayConfig().MaxRetries,
@@ -74,7 +75,7 @@ func initService() (*Service, error) {
 			RetryMaxDelay:   binternal.DefaultOutboxRelayConfig().RetryMaxDelay,
 			AuditRetention:  binternal.DefaultOutboxRelayConfig().AuditRetention,
 		}
-		relayInstance := relay.NewOutboxRelay(coreSvc.DB(), publisher, relayConfig)
+		relayInstance := relay.NewOutboxRelay(coreSvc.DB(), relayConfig)
 		go relayInstance.Start(context.Background())
 
 		serviceInstance = &Service{

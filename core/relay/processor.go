@@ -4,15 +4,9 @@ import (
 	"context"
 	"time"
 
-	"encore.app/booking/repository"
+	"encore.app/core/repository"
 	"gorm.io/gorm"
 )
-
-// Processor handles the core event processing logic
-type Processor interface {
-	GetUnprocessedEvents(ctx context.Context, db *gorm.DB, batchSize int) ([]*repository.OutboxEvent, error)
-	MarkEventProcessed(ctx context.Context, db *gorm.DB, eventID string, processedAt *time.Time) error
-}
 
 // DefaultProcessor implements the Processor interface
 type DefaultProcessor struct{}
