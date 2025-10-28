@@ -100,6 +100,24 @@ func (r *QuoteRepository) GetByBookingID(ctx context.Context, bookingID string) 
 	return quotes, nil
 }
 
+// GetByIDForUpdate retrieves a quote with row-level lock (FOR UPDATE)
+func (r *QuoteRepository) GetByIDForUpdate(ctx context.Context, id string) (*domain.Quote, error) {
+	var quote domain.Quote
+	result := r.db.WithContext(ctx).
+		Clauses(clause.Locking{Strength: "UPDATE"}).
+		Where("id = ?", id).
+		First(&quote)
+
+	if result.Error != nil {
+		if errors.Is(result.Error, gorm.ErrRecordNotFound) {
+			return nil, domain.ErrQuoteNotFound
+		}
+		return nil, fmt.Errorf("failed to get quote for update: %w", result.Error)
+	}
+
+	return &quote, nil
+}
+
 // ============================================================================
 // Query Operations
 // ============================================================================
@@ -187,117 +205,4 @@ func getTopicForState(state string) string {
 	default:
 		return "quote-v1-state-changed"
 	}
-}
-
-// ============================================================================
-// Additional Query Methods (for future use)
-// ============================================================================
-
-// GetLatestByBookingID retrieves the latest version of quote for a booking
-func (r *QuoteRepository) GetLatestByBookingID(ctx context.Context, bookingID string) (*domain.Quote, error) {
-	var quote domain.Quote
-	result := r.db.WithContext(ctx).
-		Where("booking_id = ?", bookingID).
-		Order("version DESC, created_at DESC").
-		First(&quote)
-
-	if result.Error != nil {
-		if errors.Is(result.Error, gorm.ErrRecordNotFound) {
-			return nil, domain.ErrQuoteNotFound
-		}
-		return nil, fmt.Errorf("failed to get latest quote: %w", result.Error)
-	}
-
-	return &quote, nil
-}
-
-// ListByArtisan retrieves quotes proposed by a specific artisan
-func (r *QuoteRepository) ListByArtisan(ctx context.Context, artisanID string, state domain.QuoteState, limit, offset int) ([]*domain.Quote, error) {
-	query := r.db.WithContext(ctx).Where("proposed_by = ?", artisanID)
-
-	// Filter by state if provided
-	if state != "" {
-		query = query.Where("state = ?", state)
-	}
-
-	// Apply pagination
-	if limit > 0 {
-		query = query.Limit(limit)
-	}
-	if offset > 0 {
-		query = query.Offset(offset)
-	}
-
-	var quotes []*domain.Quote
-	result := query.Order("created_at DESC").Find(&quotes)
-
-	if result.Error != nil {
-		return nil, fmt.Errorf("failed to list quotes by artisan: %w", result.Error)
-	}
-
-	return quotes, nil
-}
-
-// CountByBookingID counts quotes for a booking
-func (r *QuoteRepository) CountByBookingID(ctx context.Context, bookingID string) (int64, error) {
-	var count int64
-	result := r.db.WithContext(ctx).
-		Model(&domain.Quote{}).
-		Where("booking_id = ?", bookingID).
-		Count(&count)
-
-	if result.Error != nil {
-		return 0, fmt.Errorf("failed to count quotes: %w", result.Error)
-	}
-
-	return count, nil
-}
-
-// CountByState counts quotes in a specific state
-func (r *QuoteRepository) CountByState(ctx context.Context, state domain.QuoteState) (int64, error) {
-	var count int64
-	result := r.db.WithContext(ctx).
-		Model(&domain.Quote{}).
-		Where("state = ?", state).
-		Count(&count)
-
-	if result.Error != nil {
-		return 0, fmt.Errorf("failed to count quotes by state: %w", result.Error)
-	}
-
-	return count, nil
-}
-
-// GetByIDForUpdate retrieves a quote with row-level lock (FOR UPDATE)
-func (r *QuoteRepository) GetByIDForUpdate(ctx context.Context, id string) (*domain.Quote, error) {
-	var quote domain.Quote
-	result := r.db.WithContext(ctx).
-		Clauses(clause.Locking{Strength: "UPDATE"}).
-		Where("id = ?", id).
-		First(&quote)
-
-	if result.Error != nil {
-		if errors.Is(result.Error, gorm.ErrRecordNotFound) {
-			return nil, domain.ErrQuoteNotFound
-		}
-		return nil, fmt.Errorf("failed to get quote for update: %w", result.Error)
-	}
-
-	return &quote, nil
-}
-
-// DeleteExpiredOutboxEvents deletes processed outbox events older than retention period
-// This is called by the relay for cleanup
-func (r *QuoteRepository) DeleteExpiredOutboxEvents(ctx context.Context, retentionDays int) (int64, error) {
-	cutoffTime := time.Now().AddDate(0, 0, -retentionDays)
-
-	result := r.db.WithContext(ctx).
-		Where("processed_at IS NOT NULL AND processed_at < ?", cutoffTime).
-		Delete(&domain.OutboxEvent{})
-
-	if result.Error != nil {
-		return 0, fmt.Errorf("failed to delete expired outbox events: %w", result.Error)
-	}
-
-	return result.RowsAffected, nil
 }

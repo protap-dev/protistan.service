@@ -5,7 +5,14 @@ import (
 	"time"
 
 	eventscommon "encore.app/core/events"
+	"gorm.io/datatypes"
 )
+
+// BreakdownItem represents one line item in a quote breakdown
+type BreakdownItem struct {
+	Label       string `json:"label"`
+	AmountCents int64  `json:"amount_cents"`
+}
 
 // Quote represents a price quote for a booking
 type Quote struct {
@@ -18,8 +25,9 @@ type Quote struct {
 	State QuoteState `json:"state" gorm:"type:text;not null"`
 
 	// Pricing
-	AmountCents int64  `json:"amount_cents" gorm:"not null"`
-	Currency    string `json:"currency" gorm:"type:text;not null;default:'NGN'"`
+	AmountCents int64          `json:"amount_cents" gorm:"not null"`
+	Currency    string         `json:"currency" gorm:"type:text;not null;default:'NGN'"`
+	Breakdown   datatypes.JSON `json:"breakdown,omitempty" gorm:"type:jsonb"`
 
 	// Metadata
 	Notes                 string     `json:"notes,omitempty" gorm:"type:text"`

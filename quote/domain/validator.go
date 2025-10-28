@@ -81,6 +81,7 @@ type ProposeQuoteInput struct {
 	ValidUntil            *time.Time
 	Notes                 string
 	ProposedBy            string // Artisan ID
+	Breakdown             []BreakdownItem
 }
 
 type RejectQuoteInput struct {

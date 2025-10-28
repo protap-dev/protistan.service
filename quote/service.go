@@ -55,8 +55,8 @@ func initService() (*Service, error) {
 		authHelper := qinternal.NewAuthHelper(logger)
 		validator := domain.NewQuoteValidator()
 		repo := repository.NewQuoteRepository(coreSvc.DB())
-		quoteSvc := domain.NewQuoteService(repo, validator) // Added
-		cache := cache.NewInMemoryCache()                   // SINGLE CACHE INSTANCE
+		quoteSvc := domain.NewQuoteService(repo, validator)
+		cache := cache.NewInMemoryCache()
 		publisher := events.NewEventPublisher()
 
 		// Initialize handlers layer
@@ -111,6 +111,8 @@ type QuoteResponse struct {
 }
 
 // ProposeQuote creates and proposes a quote for a booking
+//
+//encore:api auth method=POST path=/v0/quote
 func ProposeQuote(ctx context.Context, req *handlers.ProposeQuoteRequest) (*handlers.QuoteResponse, error) {
 	svc, err := initService()
 	if err != nil {
@@ -121,7 +123,7 @@ func ProposeQuote(ctx context.Context, req *handlers.ProposeQuoteRequest) (*hand
 
 // AcceptQuote accepts a proposed quote
 //
-//encore:api auth method=POST path=/v1/quotes/:id/accept
+//encore:api auth method=POST path=/v0/quote/:id/accept
 func AcceptQuote(ctx context.Context, id string, req *handlers.AcceptQuoteRequest) (*handlers.QuoteResponse, error) {
 	svc, err := initService()
 	if err != nil {
@@ -132,7 +134,7 @@ func AcceptQuote(ctx context.Context, id string, req *handlers.AcceptQuoteReques
 
 // RejectQuote rejects a proposed quote
 //
-//encore:api auth method=POST path=/v1/quotes/:id/reject
+//encore:api auth method=POST path=/v0/quote/:id/reject
 func RejectQuote(ctx context.Context, id string, req *handlers.RejectQuoteRequest) (*handlers.QuoteResponse, error) {
 	svc, err := initService()
 	if err != nil {
@@ -148,7 +150,7 @@ var _ = cron.NewJob("quote-expiry", cron.JobConfig{
 	Endpoint: ExpireQuotes,
 })
 
-//encore:api private method=POST path=/internal/quotes/expire
+//encore:api private method=POST path=/internal/quote/expire
 func ExpireQuotes(ctx context.Context) error {
 	s, err := initService()
 	if err != nil {

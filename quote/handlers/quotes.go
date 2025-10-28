@@ -2,6 +2,7 @@ package handlers
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"time"
 
@@ -54,33 +55,35 @@ func NewQuotesHandler(
 
 // ProposeQuoteRequest represents a quote proposal request
 type ProposeQuoteRequest struct {
-	BookingID             string  `json:"booking_id"`
-	AmountCents           int64   `json:"amount_cents"`
-	Currency              string  `json:"currency"`
-	EstimatedDurationMins int     `json:"estimated_duration_mins"`
-	Notes                 string  `json:"notes,omitempty"`
-	ValidUntil            *string `json:"valid_until,omitempty"` // ISO 8601 format
+	BookingID             string                      `json:"booking_id"`
+	AmountCents           int64                       `json:"amount_cents"`
+	Currency              string                      `json:"currency"`
+	EstimatedDurationMins int                         `json:"estimated_duration_mins"`
+	Notes                 string                      `json:"notes,omitempty"`
+	ValidUntil            *string                     `json:"valid_until,omitempty"` // ISO 8601 format
+	Breakdown             []quotedomain.BreakdownItem `json:"breakdown,omitempty"`
 }
 
 // QuoteResponse represents a quote in responses
 type QuoteResponse struct {
-	ID                    string     `json:"id"`
-	BookingID             string     `json:"booking_id"`
-	Version               int        `json:"version"`
-	State                 string     `json:"state"`
-	AmountCents           int64      `json:"amount_cents"`
-	Currency              string     `json:"currency"`
-	EstimatedDurationMins int        `json:"estimated_duration_mins"`
-	Notes                 string     `json:"notes,omitempty"`
-	ValidUntil            *time.Time `json:"valid_until,omitempty"`
-	ProposedBy            string     `json:"proposed_by"`
-	ProposedAt            time.Time  `json:"proposed_at"`
-	DecisionBy            *string    `json:"decision_by,omitempty"`
-	DecidedAt             *time.Time `json:"decided_at,omitempty"`
-	RejectionReasonCode   *string    `json:"rejection_reason_code,omitempty"`
-	RejectionReasonText   *string    `json:"rejection_reason_text,omitempty"`
-	CreatedAt             time.Time  `json:"created_at"`
-	UpdatedAt             time.Time  `json:"updated_at"`
+	ID                    string                      `json:"id"`
+	BookingID             string                      `json:"booking_id"`
+	Version               int                         `json:"version"`
+	State                 string                      `json:"state"`
+	AmountCents           int64                       `json:"amount_cents"`
+	Currency              string                      `json:"currency"`
+	Breakdown             []quotedomain.BreakdownItem `json:"breakdown,omitempty"`
+	EstimatedDurationMins int                         `json:"estimated_duration_mins"`
+	Notes                 string                      `json:"notes,omitempty"`
+	ValidUntil            *time.Time                  `json:"valid_until,omitempty"`
+	ProposedBy            string                      `json:"proposed_by"`
+	ProposedAt            time.Time                   `json:"proposed_at"`
+	DecisionBy            *string                     `json:"decision_by,omitempty"`
+	DecidedAt             *time.Time                  `json:"decided_at,omitempty"`
+	RejectionReasonCode   *string                     `json:"rejection_reason_code,omitempty"`
+	RejectionReasonText   *string                     `json:"rejection_reason_text,omitempty"`
+	CreatedAt             time.Time                   `json:"created_at"`
+	UpdatedAt             time.Time                   `json:"updated_at"`
 }
 
 // ============================================================================
@@ -138,6 +141,7 @@ func (h *QuotesHandler) ProposeQuote(ctx context.Context, req *ProposeQuoteReque
 		ValidUntil:            validUntil,
 		Notes:                 req.Notes,
 		ProposedBy:            userCtx.ID, // The service will resolve this to an artisan ID
+		Breakdown:             req.Breakdown,
 	}
 
 	// 6. Call domain service to propose the quote
@@ -168,6 +172,11 @@ func (h *QuotesHandler) ProposeQuote(ctx context.Context, req *ProposeQuoteReque
 
 // toQuoteResponse converts domain Quote to API response
 func toQuoteResponse(quote *quotedomain.Quote) *QuoteResponse {
+	var breakdown []quotedomain.BreakdownItem
+	if quote.Breakdown != nil {
+		_ = json.Unmarshal(quote.Breakdown, &breakdown)
+	}
+
 	return &QuoteResponse{
 		ID:                    quote.ID,
 		BookingID:             quote.BookingID,
@@ -175,6 +184,7 @@ func toQuoteResponse(quote *quotedomain.Quote) *QuoteResponse {
 		State:                 string(quote.State),
 		AmountCents:           quote.AmountCents,
 		Currency:              quote.Currency,
+		Breakdown:             breakdown,
 		EstimatedDurationMins: quote.EstimatedDurationMins,
 		Notes:                 quote.Notes,
 		ValidUntil:            quote.ValidUntil,

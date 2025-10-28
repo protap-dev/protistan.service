@@ -2,6 +2,7 @@ package domain
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"time"
 )
@@ -25,6 +26,16 @@ func (s *QuoteService) ProposeQuote(ctx context.Context, input *ProposeQuoteInpu
 	// Validate
 	if err := s.validator.ValidateProposeQuote(ctx, input); err != nil {
 		return nil, err
+	}
+
+	// Marshal breakdown to JSON
+	var breakdownJSON []byte
+	var err error
+	if len(input.Breakdown) > 0 {
+		breakdownJSON, err = json.Marshal(input.Breakdown)
+		if err != nil {
+			return nil, fmt.Errorf("failed to marshal breakdown: %w", err)
+		}
 	}
 
 	// Default currency
@@ -60,6 +71,7 @@ func (s *QuoteService) ProposeQuote(ctx context.Context, input *ProposeQuoteInpu
 		State:                 QuoteProposed,
 		AmountCents:           input.AmountCents,
 		Currency:              input.Currency,
+		Breakdown:             breakdownJSON,
 		Notes:                 input.Notes,
 		EstimatedDurationMins: input.EstimatedDurationMins,
 		ValidUntil:            validUntil,
@@ -72,8 +84,14 @@ func (s *QuoteService) ProposeQuote(ctx context.Context, input *ProposeQuoteInpu
 
 	// Save in transaction
 	err = s.repo.WithTransaction(ctx, func(txRepo QuoteRepository) error {
-		if err := txRepo.Create(ctx, quote); err != nil {
-			return err
+		for _, existingQuote := range existingQuotes {
+			if existingQuote.State == QuoteProposed {
+				existingQuote.State = QuoteSuperseded
+				existingQuote.UpdatedAt = now
+				if err := txRepo.Update(ctx, existingQuote); err != nil {
+					return fmt.Errorf("failed to supersede quote %s: %w", existingQuote.ID, err)
+				}
+			}
 		}
 
 		// Create event
