@@ -3,10 +3,8 @@ package handlers
 import (
 	"context"
 	"fmt"
-	"slices"
 	"time"
 
-	"encore.app/artisans"
 	"encore.app/booking"
 	"encore.app/core"
 	"encore.app/core/cache"
@@ -103,20 +101,7 @@ func (h *QuotesHandler) ProposeQuote(ctx context.Context, req *ProposeQuoteReque
 		return nil, err
 	}
 
-	// 2. Verify user is an artisan
-	artisanResp, err := artisans.GetArtisanIDByUserID(ctx, userCtx.ID)
-	if err != nil {
-		h.logger.Error(ctx, "failed to get artisan profile", err, map[string]interface{}{
-			"user_id": userCtx.ID,
-		})
-		return nil, errs.B().Code(errs.PermissionDenied).Msg("artisan profile not found").Err()
-	}
-	if !artisanResp.Found {
-		return nil, errs.B().Code(errs.PermissionDenied).Msg("only artisans can propose quotes").Err()
-	}
-	artisanID := artisanResp.ArtisanID
-
-	// 3. Validate booking exists and is in correct state
+	// 2. Get booking
 	bookingResp, err := booking.GetBooking(ctx, req.BookingID)
 	if err != nil {
 		h.logger.Error(ctx, "failed to get booking", err, map[string]any{
@@ -125,31 +110,16 @@ func (h *QuotesHandler) ProposeQuote(ctx context.Context, req *ProposeQuoteReque
 		return nil, errs.B().Code(errs.NotFound).Msg("booking not found").Err()
 	}
 
-	// 4. Verify artisan is assigned to this booking
-	if bookingResp.ArtisanID == nil || *bookingResp.ArtisanID != artisanID {
-		h.logger.Error(ctx, "artisan not assigned to booking", nil, map[string]interface{}{
-			"booking_id":         req.BookingID,
-			"artisan_id":         artisanID,
-			"booking_artisan_id": bookingResp.ArtisanID,
+	// 3. Authorize that the user can propose a quote for this booking
+	if err := qinternal.AuthorizeProposeQuote(ctx, userCtx.ID, bookingResp.ArtisanID, string(bookingResp.Status)); err != nil {
+		h.logger.Error(ctx, "user not authorized to propose quote", err, map[string]any{
+			"user_id":    userCtx.ID,
+			"booking_id": req.BookingID,
 		})
-		return nil, errs.B().Code(errs.PermissionDenied).Msg("not assigned to this booking").Err()
+		return nil, err
 	}
 
-	// 5. Validate booking is in a state where quotes can be proposed
-	validStates := []string{"assigned", "pending_quote", "quote_rejected"}
-	if !contains(validStates, string(bookingResp.Status)) {
-		h.logger.Error(ctx, "booking not in valid state for quote", nil, map[string]any{
-			"booking_id":     req.BookingID,
-			"booking_status": bookingResp.Status,
-			"valid_states":   validStates,
-		})
-		return nil, errs.B().
-			Code(errs.FailedPrecondition).
-			Msgf("cannot propose quote for booking in state '%s'", bookingResp.Status).
-			Err()
-	}
-
-	// 6. Parse expiration time from request
+	// 4. Parse expiration time from request
 	var validUntil *time.Time
 	if req.ValidUntil != nil {
 		parsedTime, err := time.Parse(time.RFC3339, *req.ValidUntil)
@@ -159,7 +129,7 @@ func (h *QuotesHandler) ProposeQuote(ctx context.Context, req *ProposeQuoteReque
 		validUntil = &parsedTime
 	}
 
-	// 7. Construct input for domain service
+	// 5. Construct input for domain service
 	input := &quotedomain.ProposeQuoteInput{
 		BookingID:             req.BookingID,
 		AmountCents:           req.AmountCents,
@@ -167,10 +137,10 @@ func (h *QuotesHandler) ProposeQuote(ctx context.Context, req *ProposeQuoteReque
 		EstimatedDurationMins: req.EstimatedDurationMins,
 		ValidUntil:            validUntil,
 		Notes:                 req.Notes,
-		ProposedBy:            artisanID,
+		ProposedBy:            userCtx.ID, // The service will resolve this to an artisan ID
 	}
 
-	// 8. Call domain service to propose the quote
+	// 6. Call domain service to propose the quote
 	quote, err := h.quoteSvc.ProposeQuote(ctx, input)
 	if err != nil {
 		// Domain service handles validation, so we can just bubble up the error
@@ -180,7 +150,7 @@ func (h *QuotesHandler) ProposeQuote(ctx context.Context, req *ProposeQuoteReque
 		return nil, err // Let the framework handle the error type
 	}
 
-	// 9. Clear any cached data
+	// 7. Clear any cached data
 	h.clearQuoteCache(ctx, quote.ID)
 
 	h.logger.Info(ctx, "quote proposed successfully", map[string]interface{}{
@@ -223,9 +193,4 @@ func toQuoteResponse(quote *quotedomain.Quote) *QuoteResponse {
 func (h *QuotesHandler) clearQuoteCache(ctx context.Context, quoteID string) {
 	cacheKey := fmt.Sprintf("quote:%s", quoteID)
 	h.cache.Delete(ctx, cacheKey)
-}
-
-// contains checks if a string slice contains a value
-func contains(slice []string, val string) bool {
-	return slices.Contains(slice, val)
 }

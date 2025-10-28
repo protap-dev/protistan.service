@@ -4,6 +4,7 @@ import (
 	"context"
 
 	"encore.app/booking"
+	qinternal "encore.app/quote/internal"
 	"encore.dev/beta/errs"
 )
 
@@ -26,9 +27,7 @@ func (h *QuotesHandler) AcceptQuote(ctx context.Context, id string, req *AcceptQ
 		return nil, err
 	}
 
-	// 2. Get the quote from database to verify booking ID and ownership
-	// We get it here before calling the service to perform security checks.
-	// The service will re-fetch it within a transaction to ensure data consistency.
+	// 2. Get the quote from database to verify booking ID
 	quote, err := h.repo.GetByID(ctx, id)
 	if err != nil {
 		h.logger.Error(ctx, "failed to get quote", err, map[string]any{
@@ -47,7 +46,7 @@ func (h *QuotesHandler) AcceptQuote(ctx context.Context, id string, req *AcceptQ
 		return nil, errs.B().Code(errs.InvalidArgument).Msg("booking_id does not match quote").Err()
 	}
 
-	// 4. Get booking to verify customer ownership
+	// 4. Get booking
 	bookingResp, err := booking.GetBooking(ctx, quote.BookingID)
 	if err != nil {
 		h.logger.Error(ctx, "failed to get booking", err, map[string]any{
@@ -56,13 +55,13 @@ func (h *QuotesHandler) AcceptQuote(ctx context.Context, id string, req *AcceptQ
 		return nil, errs.B().Code(errs.NotFound).Msg("booking not found").Err()
 	}
 
-	// 5. Verify user is the customer who owns this booking
-	if bookingResp.CustomerID != userCtx.ID {
-		h.logger.Error(ctx, "user not authorized to accept quote", nil, map[string]any{
-			"user_id":     userCtx.ID,
-			"customer_id": bookingResp.CustomerID,
+	// 5. Authorize that the user can accept a quote for this booking
+	if err := qinternal.AuthorizeAcceptQuote(ctx, userCtx.ID, bookingResp.CustomerID); err != nil {
+		h.logger.Error(ctx, "user not authorized to accept quote", err, map[string]any{
+			"user_id":    userCtx.ID,
+			"booking_id": req.BookingID,
 		})
-		return nil, errs.B().Code(errs.PermissionDenied).Msg("only booking owner can accept quote").Err()
+		return nil, err
 	}
 
 	// 6. Call domain service to accept the quote

@@ -5,6 +5,7 @@ import (
 
 	"encore.app/booking"
 	quotedomain "encore.app/quote/domain"
+	qinternal "encore.app/quote/internal"
 	"encore.dev/beta/errs"
 )
 
@@ -32,7 +33,7 @@ func (h *QuotesHandler) RejectQuote(ctx context.Context, id string, req *RejectQ
 		return nil, err
 	}
 
-	// 2. Get the quote to verify booking ID and ownership
+	// 2. Get the quote to verify booking ID
 	quote, err := h.repo.GetByID(ctx, id)
 	if err != nil {
 		h.logger.Error(ctx, "failed to get quote", err, map[string]any{
@@ -43,7 +44,7 @@ func (h *QuotesHandler) RejectQuote(ctx context.Context, id string, req *RejectQ
 
 	// 3. Verify booking ID matches
 	if quote.BookingID != req.BookingID {
-		h.logger.Error(ctx, "booking id mismatch", nil, map[string]interface{}{
+		h.logger.Error(ctx, "booking id mismatch", nil, map[string]any{
 			"quote_id":           id,
 			"quote_booking_id":   quote.BookingID,
 			"request_booking_id": req.BookingID,
@@ -51,22 +52,22 @@ func (h *QuotesHandler) RejectQuote(ctx context.Context, id string, req *RejectQ
 		return nil, errs.B().Code(errs.InvalidArgument).Msg("booking_id does not match quote").Err()
 	}
 
-	// 4. Get booking to verify authorization
+	// 4. Get booking
 	bookingResp, err := booking.GetBooking(ctx, quote.BookingID)
 	if err != nil {
-		h.logger.Error(ctx, "failed to get booking", err, map[string]interface{}{
+		h.logger.Error(ctx, "failed to get booking", err, map[string]any{
 			"booking_id": quote.BookingID,
 		})
 		return nil, errs.B().Code(errs.NotFound).Msg("booking not found").Err()
 	}
 
-	// 5. Verify user is authorized to reject (customer who owns booking)
-	if bookingResp.CustomerID != userCtx.ID {
-		h.logger.Error(ctx, "user not authorized to reject quote", nil, map[string]interface{}{
-			"user_id":     userCtx.ID,
-			"customer_id": bookingResp.CustomerID,
+	// 5. Authorize that the user can reject a quote for this booking
+	if err := qinternal.AuthorizeRejectQuote(ctx, userCtx.ID, bookingResp.CustomerID); err != nil {
+		h.logger.Error(ctx, "user not authorized to reject quote", err, map[string]any{
+			"user_id":    userCtx.ID,
+			"booking_id": req.BookingID,
 		})
-		return nil, errs.B().Code(errs.PermissionDenied).Msg("only booking owner can reject quote").Err()
+		return nil, err
 	}
 
 	// 6. Construct input for domain service
@@ -80,7 +81,7 @@ func (h *QuotesHandler) RejectQuote(ctx context.Context, id string, req *RejectQ
 	updatedQuote, err := h.quoteSvc.RejectQuote(ctx, id, input)
 	if err != nil {
 		// Domain service handles validation, so we can just bubble up the error
-		h.logger.Error(ctx, "failed to reject quote", err, map[string]interface{}{
+		h.logger.Error(ctx, "failed to reject quote", err, map[string]any{
 			"quote_id": id,
 		})
 		return nil, err // Let the framework handle the error type
@@ -89,7 +90,7 @@ func (h *QuotesHandler) RejectQuote(ctx context.Context, id string, req *RejectQ
 	// 8. Clear cache
 	h.clearQuoteCache(ctx, updatedQuote.ID)
 
-	h.logger.Info(ctx, "quote rejected successfully", map[string]interface{}{
+	h.logger.Info(ctx, "quote rejected successfully", map[string]any{
 		"quote_id":    updatedQuote.ID,
 		"booking_id":  updatedQuote.BookingID,
 		"reason_code": req.ReasonCode,
