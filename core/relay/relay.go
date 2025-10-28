@@ -118,7 +118,22 @@ func (r *Relay[EventType]) processBatch(ctx context.Context) error {
 	for _, outboxEvent := range events {
 		if err := r.processEvent(ctx, outboxEvent); err != nil {
 			r.metrics.RecordEventFailure()
-			log.Printf("Failed to process outbox event %s: %v", outboxEvent.ID, err)
+
+			// Check if permanently failed
+			if outboxEvent.Status == "failed" {
+				log.Printf("⚠️  DEAD LETTER: Event %s permanently failed after %d retries. Topic: %s, Error: %s",
+					outboxEvent.ID,
+					outboxEvent.RetryCount,
+					outboxEvent.Topic,
+					*outboxEvent.LastError)
+				// TODO: Send alert/notification for manual intervention
+			} else {
+				log.Printf("Scheduled retry for event %s (attempt %d/%d) at %v",
+					outboxEvent.ID,
+					outboxEvent.RetryCount+1,
+					r.config.MaxRetries,
+					outboxEvent.NextRetryAt)
+			}
 			failed++
 		} else {
 			processed++
@@ -139,20 +154,80 @@ func (r *Relay[EventType]) processBatch(ctx context.Context) error {
 
 // processEvent processes a single outbox event
 func (r *Relay[EventType]) processEvent(ctx context.Context, outboxEvent *repository.OutboxEvent) error {
-	// Parse the event data
+	claimed, err := r.claimEvent(ctx, outboxEvent.ID)
+	if err != nil {
+		return err
+	}
+	if !claimed {
+		// Another worker claimed it, skip
+		return nil
+	}
+	// Check if we've exceeded max retries
+	if outboxEvent.RetryCount >= r.config.MaxRetries {
+		log.Printf("Event %s exceeded max retries (%d), marking as failed",
+			outboxEvent.ID, r.config.MaxRetries)
+		return r.markEventFailed(ctx, outboxEvent, "exceeded max retries")
+	}
+
 	var event EventType
 	if err := json.Unmarshal(outboxEvent.Data, &event); err != nil {
-		return fmt.Errorf("failed to unmarshal event data: %w", err)
+		// Permanent error - no point retrying
+		return r.markEventFailed(ctx, outboxEvent, fmt.Sprintf("unmarshal error: %v", err))
 	}
 
-	// Publish to the appropriate topic based on event type
+	// Attempt to publish
 	if err := r.publisher.PublishToTopic(ctx, outboxEvent, event); err != nil {
-		return fmt.Errorf("failed to publish to topic: %w", err)
+		// Increment retry count with exponential backoff
+		return r.scheduleRetry(ctx, outboxEvent, err)
 	}
 
-	// Mark event as processed (audit trail)
+	// Success - mark as processed
 	now := time.Now()
 	return r.processor.MarkEventProcessed(ctx, r.db, outboxEvent.ID, &now)
+}
+
+func (r *Relay[EventType]) scheduleRetry(ctx context.Context, event *repository.OutboxEvent, err error) error {
+	retryCount := event.RetryCount + 1
+
+	// Calculate exponential backoff
+	backoff := r.config.RetryBaseDelay * time.Duration(1<<uint(retryCount))
+	if backoff > r.config.RetryMaxDelay {
+		backoff = r.config.RetryMaxDelay
+	}
+
+	nextRetryAt := time.Now().Add(backoff)
+
+	return r.db.WithContext(ctx).Model(&repository.OutboxEvent{}).
+		Where("id = ?", event.ID).
+		Updates(map[string]interface{}{
+			"retry_count":   retryCount,
+			"last_error":    err.Error(),
+			"next_retry_at": nextRetryAt,
+		}).Error
+}
+
+func (r *Relay[EventType]) claimEvent(ctx context.Context, eventID string) (bool, error) {
+	result := r.db.WithContext(ctx).
+		Model(&repository.OutboxEvent{}).
+		Where("id = ? AND status = ?", eventID, "pending").
+		Update("status", "processing")
+
+	if result.Error != nil {
+		return false, result.Error
+	}
+
+	return result.RowsAffected > 0, nil
+}
+
+func (r *Relay[EventType]) markEventFailed(ctx context.Context, event *repository.OutboxEvent, reason string) error {
+	now := time.Now()
+	return r.db.WithContext(ctx).Model(&repository.OutboxEvent{}).
+		Where("id = ?", event.ID).
+		Updates(map[string]interface{}{
+			"status":       "failed",
+			"last_error":   reason,
+			"processed_at": now,
+		}).Error
 }
 
 // GetMetrics returns current relay metrics (thread-safe)
@@ -163,7 +238,4 @@ func (r *Relay[EventType]) GetMetrics() MetricsSnapshot {
 // IsHealthy returns health status for monitoring
 func (r *Relay[EventType]) IsHealthy() bool {
 	return r.metrics.IsHealthy()
-}
-func (r *Relay[EventType]) ProcessEvent(ctx context.Context, outboxEvent *repository.OutboxEvent, event EventType) error {
-	return r.processEvent(ctx, outboxEvent)
 }

@@ -8,10 +8,6 @@ import (
 	"encore.app/core/repository"
 )
 
-const (
-	producer string = "booking-service"
-)
-
 // BookingEvent implements the core EventData interface
 // This makes BookingEvent compatible with the core relay system
 type BookingEvent struct {
@@ -32,29 +28,29 @@ func (p *BookingPublisher) PublishToTopic(ctx context.Context, outboxEvent *repo
 	// Use the stored topic name from outbox table for routing
 	switch outboxEvent.Topic {
 	case "booking.status":
-		_, err := events.StatusTopic.Publish(ctx, events.CreateEventEnvelope(ctx, "booking.status", event.BookingEvent))
+		_, err := events.StatusTopic.Publish(ctx, *events.CreateEventEnvelope(ctx, "booking.status", event.BookingEvent))
 		return err
 	case "booking.created":
-		_, err := events.CreatedTopic.Publish(ctx, events.CreateEventEnvelope(ctx, "booking.created", event.BookingEvent))
+		_, err := events.CreatedTopic.Publish(ctx, *events.CreateEventEnvelope(ctx, "booking.created", event.BookingEvent))
 		return err
 	case "booking.cancelled":
-		_, err := events.CancelledTopic.Publish(ctx, events.CreateEventEnvelope(ctx, "booking.cancelled", event.BookingEvent))
+		_, err := events.CancelledTopic.Publish(ctx, *events.CreateEventEnvelope(ctx, "booking.cancelled", event.BookingEvent))
 		return err
 	case "booking.offered":
-		_, err := events.OfferedTopic.Publish(ctx, events.CreateEventEnvelope(ctx, "booking.offered", event.BookingEvent))
+		_, err := events.OfferedTopic.Publish(ctx, *events.CreateEventEnvelope(ctx, "booking.offered", event.BookingEvent))
 		return err
 	case "booking.assigned":
-		_, err := events.AssignedTopic.Publish(ctx, events.CreateEventEnvelope(ctx, "booking.assigned", event.BookingEvent))
+		_, err := events.AssignedTopic.Publish(ctx, *events.CreateEventEnvelope(ctx, "booking.assigned", event.BookingEvent))
 		return err
 	case "booking.offer.rejected":
-		_, err := events.OfferRejectedTopic.Publish(ctx, events.CreateEventEnvelope(ctx, "booking.offer.rejected", event.BookingEvent))
+		_, err := events.OfferRejectedTopic.Publish(ctx, *events.CreateEventEnvelope(ctx, "booking.offer.rejected", event.BookingEvent))
 		return err
 	case "booking.v1.offer.expired":
-		_, err := events.OfferExpiredTopic.Publish(ctx, events.CreateEventEnvelope(ctx, "booking.v1.offer.expired", event.BookingEvent))
+		_, err := events.OfferExpiredTopic.Publish(ctx, *events.CreateEventEnvelope(ctx, "booking.v1.offer.expired", event.BookingEvent))
 		return err
 	default:
 		// Default to status topic for unknown topic names
-		_, err := events.StatusTopic.Publish(ctx, events.CreateEventEnvelope(ctx, "booking.status", event.BookingEvent))
+		_, err := events.StatusTopic.Publish(ctx, *events.CreateEventEnvelope(ctx, "booking.status", event.BookingEvent))
 		return err
 	}
 }

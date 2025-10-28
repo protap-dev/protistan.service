@@ -15,9 +15,13 @@ type DefaultProcessor struct{}
 func (p *DefaultProcessor) GetUnprocessedEvents(ctx context.Context, db *gorm.DB, batchSize int) ([]*repository.OutboxEvent, error) {
 	var events []*repository.OutboxEvent
 
+	now := time.Now()
+
 	err := db.WithContext(ctx).
 		Model(&repository.OutboxEvent{}).
 		Where("processed_at IS NULL").
+		Where("status IN (?)", []string{"pending", "processing"}).
+		Where("(next_retry_at IS NULL OR next_retry_at <= ?)", now).
 		Order("inserted_at ASC").
 		Limit(batchSize).
 		Find(&events).Error

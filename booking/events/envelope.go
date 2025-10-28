@@ -11,8 +11,6 @@ const (
 	producer string = "booking-service"
 )
 
-// EventEnvelope wraps booking events with observability metadata for reliable saga tracing
-// This is an alias to the core EventEnvelope for backward compatibility
 type EventEnvelope[T any] = eventscommon.EventEnvelope[T]
 
 // CreateEventEnvelope creates a new event envelope with the provided data and metadata

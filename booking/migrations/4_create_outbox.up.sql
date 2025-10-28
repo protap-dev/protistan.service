@@ -9,18 +9,21 @@ CREATE TABLE outbox (
     topic TEXT NOT NULL,
     data JSONB NOT NULL,
     inserted_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-    processed_at TIMESTAMPTZ -- Production-ready: tracks when event was processed for audit trail
+    processed_at TIMESTAMPTZ,
+    next_retry_at TIMESTAMPTZ,
+    status TEXT DEFAULT 'pending'
 );
 
 -- Create index for efficient polling by topic and insertion order
 CREATE INDEX outbox_topic_idx ON outbox (topic, inserted_at);
 
--- Create index for efficient querying of unprocessed events (processed_at IS NULL)
-CREATE INDEX idx_outbox_processed_at ON outbox(processed_at) WHERE processed_at IS NULL;
-
 -- Create index for efficient cleanup of old processed events (processed_at IS NOT NULL)
 CREATE INDEX idx_outbox_processed_at_cleanup ON outbox(processed_at) WHERE processed_at IS NOT NULL;
 
+-- Create index for efficient querying of events that need retry (processed_at IS NULL)
+CREATE INDEX IF NOT EXISTS idx_outbox_next_retry ON outbox(next_retry_at) WHERE processed_at IS NULL;
+
+CREATE INDEX idx_outbox_poll_query ON outbox (status, next_retry_at, inserted_at) WHERE processed_at IS NULL;
 -- ============================================================================
 -- COMMENTS FOR DOCUMENTATION
 -- ============================================================================
