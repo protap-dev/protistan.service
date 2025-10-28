@@ -105,7 +105,7 @@ func (s *QuoteService) AcceptQuote(ctx context.Context, quoteID, decisionBy stri
 	var updatedQuote *Quote
 
 	err := s.repo.WithTransaction(ctx, func(txRepo QuoteRepository) error {
-		quote, err := txRepo.GetByID(ctx, quoteID)
+		quote, err := txRepo.GetByIDForUpdate(ctx, quoteID)
 		if err != nil {
 			return err
 		}
@@ -155,7 +155,7 @@ func (s *QuoteService) RejectQuote(ctx context.Context, quoteID string, input *R
 	var updatedQuote *Quote
 
 	err := s.repo.WithTransaction(ctx, func(txRepo QuoteRepository) error {
-		quote, err := txRepo.GetByID(ctx, quoteID)
+		quote, err := txRepo.GetByIDForUpdate(ctx, quoteID)
 		if err != nil {
 			return err
 		}
@@ -206,7 +206,7 @@ func (s *QuoteService) RejectQuote(ctx context.Context, quoteID string, input *R
 // ExpireQuote marks quote as expired (called by cron)
 func (s *QuoteService) ExpireQuote(ctx context.Context, quoteID string) error {
 	return s.repo.WithTransaction(ctx, func(txRepo QuoteRepository) error {
-		quote, err := txRepo.GetByID(ctx, quoteID)
+		quote, err := txRepo.GetByIDForUpdate(ctx, quoteID)
 		if err != nil {
 			return err
 		}

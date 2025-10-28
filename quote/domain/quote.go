@@ -77,6 +77,7 @@ type QuoteRepository interface {
 	Create(ctx context.Context, quote *Quote) error
 	Update(ctx context.Context, quote *Quote) error
 	GetByID(ctx context.Context, id string) (*Quote, error)
+	GetByIDForUpdate(ctx context.Context, id string) (*Quote, error)
 	GetByBookingID(ctx context.Context, bookingID string) ([]*Quote, error)
 
 	// Query operations

@@ -2,10 +2,8 @@ package handlers
 
 import (
 	"context"
-	"time"
 
 	"encore.app/booking"
-	eventscommon "encore.app/core/events"
 	quotedomain "encore.app/quote/domain"
 	"encore.dev/beta/errs"
 )
@@ -34,7 +32,7 @@ func (h *QuotesHandler) RejectQuote(ctx context.Context, id string, req *RejectQ
 		return nil, err
 	}
 
-	// 2. Get the quote
+	// 2. Get the quote to verify booking ID and ownership
 	quote, err := h.repo.GetByID(ctx, id)
 	if err != nil {
 		h.logger.Error(ctx, "failed to get quote", err, map[string]any{
@@ -63,7 +61,6 @@ func (h *QuotesHandler) RejectQuote(ctx context.Context, id string, req *RejectQ
 	}
 
 	// 5. Verify user is authorized to reject (customer who owns booking)
-	// In MVP, only customer can reject. In future, artisan could also withdraw/cancel their quote
 	if bookingResp.CustomerID != userCtx.ID {
 		h.logger.Error(ctx, "user not authorized to reject quote", nil, map[string]interface{}{
 			"user_id":     userCtx.ID,
@@ -72,89 +69,24 @@ func (h *QuotesHandler) RejectQuote(ctx context.Context, id string, req *RejectQ
 		return nil, errs.B().Code(errs.PermissionDenied).Msg("only booking owner can reject quote").Err()
 	}
 
-	// 6. Validate rejection using domain validator
-	if err := h.validator.ValidateRejectQuote(ctx, quote, &quotedomain.RejectQuoteInput{
+	// 6. Construct input for domain service
+	input := &quotedomain.RejectQuoteInput{
 		DecisionBy: userCtx.ID,
 		ReasonCode: req.ReasonCode,
 		ReasonText: req.ReasonText,
-	}); err != nil {
-		h.logger.Error(ctx, "quote rejection validation failed", err, map[string]interface{}{
-			"quote_id": id,
-			"state":    quote.State,
-		})
-		return nil, errs.B().Code(errs.FailedPrecondition).Msg(err.Error()).Err()
 	}
 
-	// 7. Update quote and publish event in transaction
-	now := time.Now()
-	var updatedQuote *quotedomain.Quote
-
-	err = h.repo.WithTransaction(ctx, func(txRepo quotedomain.QuoteRepository) error {
-		// Re-fetch within transaction
-		current, err := txRepo.GetByID(ctx, id)
-		if err != nil {
-			return err
-		}
-
-		// Double-check state
-		if current.State != quotedomain.QuoteProposed {
-			return errs.B().
-				Code(errs.FailedPrecondition).
-				Msgf("quote is in state '%s', can only reject proposed quotes", current.State).
-				Err()
-		}
-
-		// Update quote state
-		previousState := current.State
-		current.State = quotedomain.QuoteRejected
-		current.DecisionBy = &userCtx.ID
-		current.DecidedAt = &now
-		current.RejectionReasonCode = &req.ReasonCode
-		current.RejectionReasonText = req.ReasonText
-		current.UpdatedAt = now
-		current.DBVersion++
-
-		// Save to database
-		if err := txRepo.Update(ctx, current); err != nil {
-			h.logger.Error(ctx, "failed to update quote", err, map[string]interface{}{
-				"quote_id": id,
-			})
-			return err
-		}
-
-		// Create event for outbox
-		event := &eventscommon.QuoteEvent{
-			QuoteID:             current.ID,
-			BookingID:           current.BookingID,
-			Version:             current.Version,
-			State:               string(quotedomain.QuoteRejected),
-			PreviousState:       string(previousState),
-			AmountCents:         current.AmountCents,
-			Currency:            current.Currency,
-			ProposedBy:          current.ProposedBy,
-			DecisionBy:          &userCtx.ID,
-			Timestamp:           now,
-			UserID:              userCtx.ID,
-			RejectionReasonCode: &req.ReasonCode,
-		}
-
-		// Store event in outbox
-		if err := txRepo.CreateEventInOutbox(ctx, event); err != nil {
-			h.logger.Error(ctx, "failed to create event in outbox", err, map[string]interface{}{
-				"quote_id": id,
-			})
-			return err
-		}
-
-		updatedQuote = current
-		return nil
-	})
-
+	// 7. Call domain service to reject the quote
+	updatedQuote, err := h.quoteSvc.RejectQuote(ctx, id, input)
 	if err != nil {
-		return nil, err
+		// Domain service handles validation, so we can just bubble up the error
+		h.logger.Error(ctx, "failed to reject quote", err, map[string]interface{}{
+			"quote_id": id,
+		})
+		return nil, err // Let the framework handle the error type
 	}
 
-	// Clear cache
+	// 8. Clear cache
 	h.clearQuoteCache(ctx, updatedQuote.ID)
 
 	h.logger.Info(ctx, "quote rejected successfully", map[string]interface{}{

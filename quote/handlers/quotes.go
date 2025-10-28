@@ -10,7 +10,6 @@ import (
 	"encore.app/booking"
 	"encore.app/core"
 	"encore.app/core/cache"
-	eventscommon "encore.app/core/events"
 	quotedomain "encore.app/quote/domain"
 	qinternal "encore.app/quote/internal"
 	"encore.dev/beta/errs"
@@ -19,6 +18,7 @@ import (
 // QuotesHandler handles quote-related business logic
 type QuotesHandler struct {
 	repo       quotedomain.QuoteRepository
+	quoteSvc   *quotedomain.QuoteService // Added
 	validator  *quotedomain.Validator
 	logger     qinternal.ServiceLogger
 	cache      cache.CacheManager
@@ -30,6 +30,7 @@ type QuotesHandler struct {
 // NewQuotesHandler creates a new quotes handler
 func NewQuotesHandler(
 	repo quotedomain.QuoteRepository,
+	quoteSvc *quotedomain.QuoteService, // Added
 	validator *quotedomain.Validator,
 	logger qinternal.ServiceLogger,
 	cache cache.CacheManager,
@@ -39,6 +40,7 @@ func NewQuotesHandler(
 ) *QuotesHandler {
 	return &QuotesHandler{
 		repo:       repo,
+		quoteSvc:   quoteSvc, // Added
 		validator:  validator,
 		logger:     logger,
 		cache:      cache,
@@ -147,13 +149,7 @@ func (h *QuotesHandler) ProposeQuote(ctx context.Context, req *ProposeQuoteReque
 			Err()
 	}
 
-	// 6. Set default currency
-	currency := req.Currency
-	if currency == "" {
-		currency = "NGN"
-	}
-
-	// 7. Parse and validate expiration time
+	// 6. Parse expiration time from request
 	var validUntil *time.Time
 	if req.ValidUntil != nil {
 		parsedTime, err := time.Parse(time.RFC3339, *req.ValidUntil)
@@ -161,104 +157,30 @@ func (h *QuotesHandler) ProposeQuote(ctx context.Context, req *ProposeQuoteReque
 			return nil, errs.B().Code(errs.InvalidArgument).Msg("invalid valid_until format, use ISO 8601").Err()
 		}
 		validUntil = &parsedTime
-	} else {
-		// Default: 48 hours from now
-		defaultExpiry := time.Now().Add(48 * time.Hour)
-		validUntil = &defaultExpiry
 	}
 
-	// 8. Validate quote data using domain validator
-	if err := h.validator.ValidateProposeQuote(ctx, &quotedomain.ProposeQuoteInput{
+	// 7. Construct input for domain service
+	input := &quotedomain.ProposeQuoteInput{
 		BookingID:             req.BookingID,
 		AmountCents:           req.AmountCents,
-		Currency:              currency,
+		Currency:              req.Currency,
 		EstimatedDurationMins: req.EstimatedDurationMins,
 		ValidUntil:            validUntil,
 		Notes:                 req.Notes,
 		ProposedBy:            artisanID,
-	}); err != nil {
-		h.logger.Error(ctx, "quote validation failed", err, map[string]interface{}{
+	}
+
+	// 8. Call domain service to propose the quote
+	quote, err := h.quoteSvc.ProposeQuote(ctx, input)
+	if err != nil {
+		// Domain service handles validation, so we can just bubble up the error
+		h.logger.Error(ctx, "failed to propose quote", err, map[string]any{
 			"booking_id": req.BookingID,
 		})
-		return nil, errs.B().Code(errs.InvalidArgument).Msg(err.Error()).Err()
+		return nil, err // Let the framework handle the error type
 	}
 
-	// 9. Determine version (check for existing quotes on this booking)
-	existingQuotes, err := h.repo.GetByBookingID(ctx, req.BookingID)
-	if err != nil {
-		h.logger.Error(ctx, "failed to check existing quotes", err, map[string]interface{}{
-			"booking_id": req.BookingID,
-		})
-		return nil, errs.B().Code(errs.Internal).Msg("failed to check existing quotes").Err()
-	}
-
-	version := 1
-	for _, q := range existingQuotes {
-		if q.Version >= version {
-			version = q.Version + 1
-		}
-	}
-
-	// 10. Create quote entity
-	now := time.Now()
-	quote := &quotedomain.Quote{
-		BookingID:             req.BookingID,
-		Version:               version,
-		State:                 quotedomain.QuoteProposed,
-		AmountCents:           req.AmountCents,
-		Currency:              currency,
-		Notes:                 req.Notes,
-		EstimatedDurationMins: req.EstimatedDurationMins,
-		ValidUntil:            validUntil,
-		ProposedBy:            artisanID,
-		ProposedAt:            now,
-		CreatedAt:             now,
-		UpdatedAt:             now,
-		DBVersion:             1,
-	}
-
-	// 11. Save quote and publish event in transaction (transactional outbox pattern)
-	err = h.repo.WithTransaction(ctx, func(txRepo quotedomain.QuoteRepository) error {
-		// Create quote in database
-		if err := txRepo.Create(ctx, quote); err != nil {
-			h.logger.Error(ctx, "failed to create quote in db", err, map[string]interface{}{
-				"booking_id": req.BookingID,
-			})
-			return err
-		}
-
-		// Create event for outbox
-		event := &eventscommon.QuoteEvent{
-			QuoteID:             quote.ID,
-			BookingID:           quote.BookingID,
-			Version:             quote.Version,
-			State:               string(quotedomain.QuoteProposed),
-			PreviousState:       "",
-			AmountCents:         quote.AmountCents,
-			Currency:            quote.Currency,
-			ProposedBy:          quote.ProposedBy,
-			DecisionBy:          nil,
-			Timestamp:           now,
-			UserID:              userCtx.ID,
-			RejectionReasonCode: nil,
-		}
-
-		// Store event in outbox table for guaranteed delivery
-		if err := txRepo.CreateEventInOutbox(ctx, event); err != nil {
-			h.logger.Error(ctx, "failed to create event in outbox", err, map[string]interface{}{
-				"quote_id": quote.ID,
-			})
-			return err
-		}
-
-		return nil
-	})
-
-	if err != nil {
-		return nil, errs.B().Code(errs.Internal).Msg("failed to create quote").Err()
-	}
-
-	// 12. Clear any cached data
+	// 9. Clear any cached data
 	h.clearQuoteCache(ctx, quote.ID)
 
 	h.logger.Info(ctx, "quote proposed successfully", map[string]interface{}{

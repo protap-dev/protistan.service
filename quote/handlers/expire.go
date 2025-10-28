@@ -4,7 +4,6 @@ import (
 	"context"
 	"time"
 
-	eventscommon "encore.app/core/events"
 	quotedomain "encore.app/quote/domain"
 	"encore.dev/beta/errs"
 )
@@ -26,13 +25,13 @@ func (h *QuotesHandler) ExpireQuotes(ctx context.Context) error {
 	}
 
 	if len(expiredQuotes) == 0 {
-		h.logger.Info(ctx, "no expired quotes found", map[string]interface{}{
+		h.logger.Info(ctx, "no expired quotes found", map[string]any{
 			"scanned_at": time.Now(),
 		})
 		return nil
 	}
 
-	h.logger.Info(ctx, "found expired quotes", map[string]interface{}{
+	h.logger.Info(ctx, "found expired quotes", map[string]any{
 		"count": len(expiredQuotes),
 	})
 
@@ -43,7 +42,7 @@ func (h *QuotesHandler) ExpireQuotes(ctx context.Context) error {
 	for _, quote := range expiredQuotes {
 		err := h.expireQuote(ctx, quote)
 		if err != nil {
-			h.logger.Error(ctx, "failed to expire quote", err, map[string]interface{}{
+			h.logger.Error(ctx, "failed to expire quote", err, map[string]any{
 				"quote_id":   quote.ID,
 				"booking_id": quote.BookingID,
 			})
@@ -53,7 +52,7 @@ func (h *QuotesHandler) ExpireQuotes(ctx context.Context) error {
 		successCount++
 	}
 
-	h.logger.Info(ctx, "quote expiry scan completed", map[string]interface{}{
+	h.logger.Info(ctx, "quote expiry scan completed", map[string]any{
 		"success_count": successCount,
 		"error_count":   errorCount,
 		"total":         len(expiredQuotes),
@@ -70,67 +69,21 @@ func (h *QuotesHandler) ExpireQuotes(ctx context.Context) error {
 	return nil
 }
 
-// expireQuote transitions a single quote to expired status and publishes event
+// expireQuote transitions a single quote to expired status by calling the domain service.
 func (h *QuotesHandler) expireQuote(ctx context.Context, quote *quotedomain.Quote) error {
-	return h.repo.WithTransaction(ctx, func(txRepo quotedomain.QuoteRepository) error {
-		// Re-fetch quote within transaction to ensure we have latest state
-		current, err := txRepo.GetByID(ctx, quote.ID)
-		if err != nil {
-			return err
-		}
-
-		// Idempotency check: only process if still proposed
-		if current.State != quotedomain.QuoteProposed {
-			h.logger.Info(ctx, "quote already processed, skipping", map[string]any{
-				"quote_id": quote.ID,
-				"state":    current.State,
-			})
-			return nil
-		}
-
-		// Double-check expiry within transaction (defensive)
-		if current.ValidUntil == nil || time.Now().Before(*current.ValidUntil) {
-			h.logger.Info(ctx, "quote no longer expired, skipping", map[string]any{
-				"quote_id":    quote.ID,
-				"valid_until": current.ValidUntil,
-			})
-			return nil
-		}
-
-		// Update quote status to expired
-		now := time.Now()
-		current.State = quotedomain.QuoteExpired
-		current.UpdatedAt = now
-
-		if err := txRepo.Update(ctx, current); err != nil {
-			return err
-		}
-
-		// Create quote expired event
-		event := &eventscommon.QuoteEvent{
-			QuoteID:             current.ID,
-			BookingID:           current.BookingID,
-			Version:             current.Version,
-			State:               string(quotedomain.QuoteExpired),
-			PreviousState:       string(quotedomain.QuoteProposed),
-			AmountCents:         current.AmountCents,
-			Currency:            current.Currency,
-			ProposedBy:          current.ProposedBy,
-			Timestamp:           now,
-			UserID:              "system",
-			RejectionReasonCode: nil,
-		}
-
-		// Write event to outbox for guaranteed delivery
-		if err := txRepo.CreateEventInOutbox(ctx, event); err != nil {
-			return err
-		}
-
-		h.logger.Info(ctx, "quote expired successfully", map[string]interface{}{
-			"quote_id":   current.ID,
-			"booking_id": current.BookingID,
+	// The domain service handles the transaction and all business logic,
+	// including idempotency checks.
+	err := h.quoteSvc.ExpireQuote(ctx, quote.ID)
+	if err != nil {
+		// The service layer logs errors, but we log here as well to capture the context of the cron job.
+		h.logger.Error(ctx, "failed to expire quote via domain service", err, map[string]any{
+			"quote_id": quote.ID,
 		})
+		return err
+	}
 
-		return nil
+	h.logger.Info(ctx, "successfully processed quote for expiration", map[string]any{
+		"quote_id": quote.ID,
 	})
+	return nil
 }

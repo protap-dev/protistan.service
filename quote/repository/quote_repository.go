@@ -9,6 +9,7 @@ import (
 
 	"encore.app/quote/domain"
 	"gorm.io/gorm"
+	"gorm.io/gorm/clause"
 )
 
 // QuoteRepository implements domain.QuoteRepository using GORM
@@ -268,23 +269,22 @@ func (r *QuoteRepository) CountByState(ctx context.Context, state domain.QuoteSt
 }
 
 // GetByIDForUpdate retrieves a quote with row-level lock (FOR UPDATE)
-// Use this when you need to prevent concurrent modifications
-//func (r *QuoteRepository) GetByIDForUpdate(ctx context.Context, id string) (*domain.Quote, error) {
-//	var quote domain.Quote
-//	result := r.db.WithContext(ctx).
-//		Clauses(gorm.Locking{Strength: "UPDATE"}).
-//		Where("id = ?", id).
-//		First(&quote)
+func (r *QuoteRepository) GetByIDForUpdate(ctx context.Context, id string) (*domain.Quote, error) {
+	var quote domain.Quote
+	result := r.db.WithContext(ctx).
+		Clauses(clause.Locking{Strength: "UPDATE"}).
+		Where("id = ?", id).
+		First(&quote)
 
-//	if result.Error != nil {
-//		if errors.Is(result.Error, gorm.ErrRecordNotFound) {
-//			return nil, domain.ErrQuoteNotFound
-//		}
-//		return nil, fmt.Errorf("failed to get quote for update: %w", result.Error)
-//	}
+	if result.Error != nil {
+		if errors.Is(result.Error, gorm.ErrRecordNotFound) {
+			return nil, domain.ErrQuoteNotFound
+		}
+		return nil, fmt.Errorf("failed to get quote for update: %w", result.Error)
+	}
 
-//	return &quote, nil
-//}
+	return &quote, nil
+}
 
 // DeleteExpiredOutboxEvents deletes processed outbox events older than retention period
 // This is called by the relay for cleanup

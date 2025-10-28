@@ -55,11 +55,12 @@ func initService() (*Service, error) {
 		authHelper := qinternal.NewAuthHelper(logger)
 		validator := domain.NewQuoteValidator()
 		repo := repository.NewQuoteRepository(coreSvc.DB())
-		cache := cache.NewInMemoryCache() // SINGLE CACHE INSTANCE
+		quoteSvc := domain.NewQuoteService(repo, validator) // Added
+		cache := cache.NewInMemoryCache()                   // SINGLE CACHE INSTANCE
 		publisher := events.NewEventPublisher()
 
 		// Initialize handlers layer
-		QuotesHandler := handlers.NewQuotesHandler(repo, validator, logger, cache, coreSvc, authHelper, publisher)
+		QuotesHandler := handlers.NewQuotesHandler(repo, quoteSvc, validator, logger, cache, coreSvc, authHelper, publisher)
 
 		// Initialize outbox relay
 		relayConfig := corerelay.Config{
