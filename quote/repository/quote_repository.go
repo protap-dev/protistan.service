@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"time"
 
+	corerepo "encore.app/core/repository"
 	"encore.app/quote/domain"
 	"gorm.io/gorm"
 	"gorm.io/gorm/clause"
@@ -173,10 +174,11 @@ func (r *QuoteRepository) CreateEventInOutbox(ctx context.Context, event *domain
 	topic := getTopicForState(event.State)
 
 	// Create outbox entry
-	outboxEvent := &domain.OutboxEvent{
-		Topic:      topic,
-		Data:       eventData,
-		InsertedAt: time.Now(),
+	outboxEvent := &corerepo.OutboxEvent{
+		Topic:       topic,
+		Data:        eventData,
+		InsertedAt:  time.Now(),
+		ProcessedAt: nil,
 	}
 
 	result := r.db.WithContext(ctx).Create(outboxEvent)

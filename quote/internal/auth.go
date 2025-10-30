@@ -38,7 +38,7 @@ func (h *AuthHelper) ExtractUserContext(ctx context.Context, action string) (*Us
 	userIDStr := string(userID)
 
 	// Extract correlation/causation IDs from HTTP headers if available
-	metadata, _ := eventscommon.ExtractEventMetadata(ctx)
+	metadata := eventscommon.GetEventMetadata(ctx)
 
 	h.logger.Info(ctx, action, map[string]any{
 		"user_id":        userIDStr,

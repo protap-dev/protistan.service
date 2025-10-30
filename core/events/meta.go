@@ -35,5 +35,10 @@ func GetEventMetadata(ctx context.Context) *EventMetadata {
 	if metadata, ok := ExtractEventMetadata(ctx); ok {
 		return metadata
 	}
-	return nil
+	return &EventMetadata{
+		CorrelationID: GenerateUUID(),
+		CausationID:   "",
+		UserID:        "",
+		RequestID:     GenerateUUID(),
+	}
 }
