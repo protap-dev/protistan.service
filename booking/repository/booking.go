@@ -11,12 +11,16 @@ import (
 
 // bookingRepository implements domain.BookingRepository
 type bookingRepository struct {
-	db *gorm.DB
+	db     *gorm.DB
+	coreDB *gorm.DB
 }
 
 // NewBookingRepository creates a new booking repository
-func NewBookingRepository(db *gorm.DB) domain.BookingRepository {
-	return &bookingRepository{db: db}
+func NewBookingRepository(db *gorm.DB, coreDB *gorm.DB) domain.BookingRepository {
+	return &bookingRepository{
+		db:     db,
+		coreDB: coreDB,
+	}
 }
 
 // Create inserts a new booking

@@ -11,12 +11,26 @@ import (
 
 // VerifyUserAccess ensures the user can access the given booking
 func VerifyUserAccess(ctx context.Context, userID string, booking *domain.Booking) error {
+	// Allow if user is the customer
 	if booking.CustomerID == userID {
 		return nil
 	}
-	if booking.ArtisanID != nil && *booking.ArtisanID == userID {
-		return nil
+
+	// Allow if user is the assigned artisan
+	if booking.ArtisanID != nil {
+		// Get artisan ID from user ID (user ID → artisan ID mapping)
+		artisanResp, err := artisans.GetArtisanIDByUserID(ctx, userID)
+		if err != nil {
+			// If error occurs, check if it's because user is not an artisan
+			// In that case, they simply don't have access
+			return ErrPermissionDenied
+		}
+
+		if artisanResp.Found && *booking.ArtisanID == artisanResp.ArtisanID {
+			return nil
+		}
 	}
+
 	return ErrPermissionDenied
 }
 

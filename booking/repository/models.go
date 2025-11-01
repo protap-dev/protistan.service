@@ -5,7 +5,6 @@ import (
 	"time"
 
 	"encore.app/booking/domain"
-	"encore.app/core/repository"
 	"gorm.io/datatypes"
 )
 
@@ -68,10 +67,6 @@ type offerDBModel struct {
 func (offerDBModel) TableName() string {
 	return "booking_offers"
 }
-
-// OutboxEvent is an alias for the core repository OutboxEvent
-// This allows the booking service to use the shared OutboxEvent model
-type OutboxEvent = repository.OutboxEvent
 
 // toDBModel converts domain model to database model
 func toDBModel(domainBooking *domain.Booking) *bookingDBModel {

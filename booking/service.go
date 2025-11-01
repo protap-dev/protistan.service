@@ -13,6 +13,7 @@ import (
 	"encore.app/booking/repository"
 	"encore.app/core"
 	"encore.app/core/cache"
+	coredb "encore.app/core/db"
 	eventscommon "encore.app/core/events"
 	topics_payment "encore.app/core/events/topics/payment"
 	topics_quote "encore.app/core/events/topics/quotes"
@@ -44,7 +45,7 @@ func initService() (*Service, error) {
 
 	serviceOnce.Do(func() {
 		// Initialize GORM connection
-		gormDB, err := gorm.Open(postgres.New(postgres.Config{
+		bookingGormDB, err := gorm.Open(postgres.New(postgres.Config{
 			Conn: BookingDB.Stdlib(),
 		}), &gorm.Config{})
 		if err != nil {
@@ -52,15 +53,23 @@ func initService() (*Service, error) {
 			return
 		}
 
+		coreGormDB, err := gorm.Open(postgres.New(postgres.Config{
+			Conn: coredb.ProtisanDB.Stdlib(), // Different connection to protisan core DB
+		}), &gorm.Config{})
+		if err != nil {
+			initErr = err
+			return
+		}
+
 		// Initialize core service
-		coreSvc := core.NewCoreService(gormDB)
+		coreSvc := core.NewCoreService(bookingGormDB)
 
 		// Initialize dependencies (SHARED across all requests)
 		logger := binternal.NewServiceLogger("booking")
 		authHelper := binternal.NewAuthHelper(logger)
 		validator := domain.NewBookingValidator()
 		offerValidator := domain.NewOfferValidator()
-		repo := repository.NewBookingRepository(coreSvc.DB())
+		repo := repository.NewBookingRepository(bookingGormDB, coreGormDB)
 		cache := cache.NewInMemoryCache() // SINGLE CACHE INSTANCE
 		publisher := events.NewEventPublisher()
 
@@ -76,7 +85,7 @@ func initService() (*Service, error) {
 			RetryMaxDelay:   binternal.DefaultOutboxRelayConfig().RetryMaxDelay,
 			AuditRetention:  binternal.DefaultOutboxRelayConfig().AuditRetention,
 		}
-		relayInstance := relay.NewOutboxRelay(coreSvc.DB(), relayConfig)
+		relayInstance := relay.NewOutboxRelay(coreGormDB, relayConfig)
 		go relayInstance.Start(context.Background())
 
 		serviceInstance = &Service{

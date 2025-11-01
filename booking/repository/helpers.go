@@ -113,8 +113,6 @@ func (h *RepositoryHelper) getTableModel(tableName string) any {
 		return &bookingDBModel{}
 	case "booking_offers":
 		return &offerDBModel{}
-	case "outbox":
-		return &OutboxEvent{}
 	default:
 		return &bookingDBModel{} // fallback
 	}

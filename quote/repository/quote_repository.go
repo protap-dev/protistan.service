@@ -15,12 +15,16 @@ import (
 
 // QuoteRepository implements domain.QuoteRepository using GORM
 type QuoteRepository struct {
-	db *gorm.DB
+	db     *gorm.DB
+	coreDB *gorm.DB
 }
 
 // NewQuoteRepository creates a new quote repository
-func NewQuoteRepository(db *gorm.DB) domain.QuoteRepository {
-	return &QuoteRepository{db: db}
+func NewQuoteRepository(db *gorm.DB, coreDB *gorm.DB) domain.QuoteRepository {
+	return &QuoteRepository{
+		db:     db,
+		coreDB: coreDB,
+	}
 }
 
 // ============================================================================
@@ -147,13 +151,17 @@ func (r *QuoteRepository) WithTransaction(ctx context.Context, fn func(txRepo do
 	// Check if we're already in a transaction
 	if tx := r.db.WithContext(ctx); tx.Statement.DB != nil {
 		// Already in transaction, use it directly
-		txRepo := &QuoteRepository{db: tx}
+		txRepo := &QuoteRepository{
+			db:     tx,
+			coreDB: r.coreDB}
 		return fn(txRepo)
 	}
 
 	// Start new transaction
 	return r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
-		txRepo := &QuoteRepository{db: tx}
+		txRepo := &QuoteRepository{
+			db:     tx,
+			coreDB: r.coreDB}
 		return fn(txRepo)
 	})
 }
@@ -163,8 +171,7 @@ func (r *QuoteRepository) WithTransaction(ctx context.Context, fn func(txRepo do
 // ============================================================================
 
 // CreateEventInOutbox creates an event in the outbox table
-func (r *QuoteRepository) CreateEventInOutbox(ctx context.Context, event *domain.QuoteEvent) error {
-	// Serialize event data
+func (r *QuoteRepository) CreateEventInOutbox(ctx context.Context, event *domain.QuoteEvent) error { // Serialize event data
 	eventData, err := json.Marshal(event)
 	if err != nil {
 		return fmt.Errorf("failed to marshal event: %w", err)
@@ -181,7 +188,7 @@ func (r *QuoteRepository) CreateEventInOutbox(ctx context.Context, event *domain
 		ProcessedAt: nil,
 	}
 
-	result := r.db.WithContext(ctx).Create(outboxEvent)
+	result := r.coreDB.WithContext(ctx).Create(outboxEvent)
 	if result.Error != nil {
 		return fmt.Errorf("failed to create outbox event: %w", result.Error)
 	}

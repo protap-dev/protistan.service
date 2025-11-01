@@ -65,17 +65,3 @@ CREATE TABLE quote_price_breakdown (
 );
 
 CREATE INDEX idx_quote_price_breakdown_quote_id ON quote_price_breakdown(quote_id);
-
--- Outbox table for transactional event publishing
-CREATE TABLE outbox (
-    id BIGSERIAL PRIMARY KEY,
-    topic TEXT NOT NULL,
-    data JSONB NOT NULL,
-    inserted_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-    processed_at TIMESTAMPTZ,
-    next_retry_at TIMESTAMPTZ,
-    status TEXT DEFAULT 'pending'
-);
-
-CREATE INDEX IF NOT EXISTS idx_quote_outbox_next_retry ON outbox(next_retry_at) WHERE processed_at IS NULL;
-CREATE INDEX idx_outbox_poll_query ON outbox (status, next_retry_at, inserted_at) WHERE processed_at IS NULL;

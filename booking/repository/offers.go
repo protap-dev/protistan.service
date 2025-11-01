@@ -153,5 +153,5 @@ func (r *bookingRepository) UpdateOffer(ctx context.Context, offer *domain.Booki
 
 // CreateOfferExpiredEventInOutbox writes offer expired event to outbox
 func (r *bookingRepository) CreateOfferExpiredEventInOutbox(ctx context.Context, event *domain.BookingEvent) error {
-	return insertEventInOutbox(r.db, ctx, event, "booking.v1.offer.expired")
+	return insertEventInOutbox(r.coreDB, ctx, event, "booking.v1.offer.expired")
 }

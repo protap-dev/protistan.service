@@ -6,7 +6,9 @@ import (
 
 	"encore.app/core"
 	"encore.app/core/cache"
+	coredb "encore.app/core/db"
 	corerelay "encore.app/core/relay"
+
 	"encore.app/quote/domain"
 	"encore.app/quote/events"
 	"encore.app/quote/handlers"
@@ -39,7 +41,7 @@ func initService() (*Service, error) {
 
 	serviceOnce.Do(func() {
 		// Initialize GORM connection
-		gormDB, err := gorm.Open(postgres.New(postgres.Config{
+		QuotegormDB, err := gorm.Open(postgres.New(postgres.Config{
 			Conn: QuoteDB.Stdlib(),
 		}), &gorm.Config{})
 		if err != nil {
@@ -47,14 +49,22 @@ func initService() (*Service, error) {
 			return
 		}
 
+		coreGormDB, err := gorm.Open(postgres.New(postgres.Config{
+			Conn: coredb.ProtisanDB.Stdlib(), // Different connection to protisan core DB
+		}), &gorm.Config{})
+		if err != nil {
+			initErr = err
+			return
+		}
+
 		// Initialize core service
-		coreSvc := core.NewCoreService(gormDB)
+		coreSvc := core.NewCoreService(QuotegormDB)
 
 		// Initialize dependencies (SHARED across all requests)
 		logger := qinternal.NewServiceLogger("quote")
 		authHelper := qinternal.NewAuthHelper(logger)
 		validator := domain.NewQuoteValidator()
-		repo := repository.NewQuoteRepository(coreSvc.DB())
+		repo := repository.NewQuoteRepository(QuotegormDB, coreGormDB)
 		quoteSvc := domain.NewQuoteService(repo, validator)
 		cache := cache.NewInMemoryCache()
 		publisher := events.NewEventPublisher()
@@ -71,7 +81,7 @@ func initService() (*Service, error) {
 			RetryMaxDelay:   qinternal.DefaultOutboxRelayConfig().RetryMaxDelay,
 			AuditRetention:  qinternal.DefaultOutboxRelayConfig().AuditRetention,
 		}
-		relayInstance := relay.NewOutboxRelay(coreSvc.DB(), relayConfig)
+		relayInstance := relay.NewOutboxRelay(coreGormDB, relayConfig)
 		go relayInstance.Start(context.Background())
 
 		serviceInstance = &Service{
@@ -93,12 +103,6 @@ type QuoteRequest struct {
 // AcceptQuoteRequest represents accepting a quote
 type AcceptQuoteRequest struct {
 	BookingID string `json:"booking_id"`
-}
-
-// RejectQuoteRequest represents rejecting a quote
-type RejectQuoteRequest struct {
-	BookingID string  `json:"booking_id"`
-	Reason    *string `json:"reason,omitempty"`
 }
 
 // QuoteResponse represents a quote
