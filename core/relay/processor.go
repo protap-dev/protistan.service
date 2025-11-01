@@ -37,5 +37,6 @@ func (p *DefaultProcessor) GetUnprocessedEvents(ctx context.Context, db *gorm.DB
 func (p *DefaultProcessor) MarkEventProcessed(ctx context.Context, db *gorm.DB, eventID string, processedAt *time.Time) error {
 	return db.WithContext(ctx).Model(&repository.OutboxEvent{}).
 		Where("id = ?", eventID).
-		Update("processed_at", processedAt).Error
+		Update("processed_at", processedAt).
+		Update("status", "processed").Error
 }
