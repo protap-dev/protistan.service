@@ -86,6 +86,11 @@ type QuoteResponse struct {
 	UpdatedAt             time.Time                   `json:"updated_at"`
 }
 
+// ListQuotesResponse represents multiple quotes
+type ListQuotesResponse struct {
+	Quotes []*QuoteResponse `json:"quotes"`
+}
+
 // ============================================================================
 // HANDLER IMPLEMENTATIONS
 // ============================================================================
@@ -164,6 +169,62 @@ func (h *QuotesHandler) ProposeQuote(ctx context.Context, req *ProposeQuoteReque
 	})
 
 	return toQuoteResponse(quote), nil
+}
+
+// ListQuotesByBooking retrieves all quotes for a booking
+func (h *QuotesHandler) ListQuotesByBooking(ctx context.Context, bookingID string) (*ListQuotesResponse, error) {
+	h.logger.Info(ctx, "listing quotes for booking", map[string]any{
+		"booking_id": bookingID,
+	})
+
+	// 1. Extract user context
+	userCtx, err := h.authHelper.ExtractUserContext(ctx, "listquotes")
+	if err != nil {
+		h.logger.Error(ctx, "failed to extract user context", err, nil)
+		return nil, err
+	}
+
+	// 2. Get booking to verify access
+	bookingResp, err := booking.GetBooking(ctx, bookingID)
+	if err != nil {
+		h.logger.Error(ctx, "failed to get booking", err, map[string]any{
+			"booking_id": bookingID,
+		})
+		return nil, errs.B().Code(errs.NotFound).Msg("booking not found").Err()
+	}
+
+	// 3. Authorize access - only customer or assigned artisan can view quotes
+	if err := qinternal.AuthorizeListQuotes(ctx, userCtx.ID, bookingResp.CustomerID, bookingResp.ArtisanID); err != nil {
+		h.logger.Error(ctx, "user not authorized to view quotes", err, map[string]any{
+			"user_id":    userCtx.ID,
+			"booking_id": bookingID,
+		})
+		return nil, err
+	}
+
+	// 4. Get all quotes for the booking
+	quotes, err := h.repo.GetByBookingID(ctx, bookingID)
+	if err != nil {
+		h.logger.Error(ctx, "failed to get quotes", err, map[string]any{
+			"booking_id": bookingID,
+		})
+		return nil, errs.B().Code(errs.Internal).Msg("failed to retrieve quotes").Err()
+	}
+
+	// 5. Convert to response format
+	quoteResponses := make([]*QuoteResponse, len(quotes))
+	for i, quote := range quotes {
+		quoteResponses[i] = toQuoteResponse(quote)
+	}
+
+	h.logger.Info(ctx, "quotes retrieved successfully", map[string]any{
+		"booking_id":  bookingID,
+		"quote_count": len(quotes),
+	})
+
+	return &ListQuotesResponse{
+		Quotes: quoteResponses,
+	}, nil
 }
 
 // ============================================================================

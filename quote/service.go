@@ -147,6 +147,17 @@ func RejectQuote(ctx context.Context, id string, req *handlers.RejectQuoteReques
 	return svc.QuotesHandler.RejectQuote(ctx, id, req)
 }
 
+// ListQuotesByBooking lists all quotes for a booking
+//
+//encore:api auth method=GET path=/v0/quote/booking/:bookingID
+func ListQuotesByBooking(ctx context.Context, bookingID string) (*handlers.ListQuotesResponse, error) {
+	svc, err := initService()
+	if err != nil {
+		return nil, err
+	}
+	return svc.QuotesHandler.ListQuotesByBooking(ctx, bookingID)
+}
+
 // Cron job for expiring quotes
 var _ = cron.NewJob("quote-expiry", cron.JobConfig{
 	Title:    "Expire Pending Quotes",

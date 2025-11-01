@@ -84,6 +84,12 @@ func (s *QuoteService) ProposeQuote(ctx context.Context, input *ProposeQuoteInpu
 
 	// Save in transaction
 	err = s.repo.WithTransaction(ctx, func(txRepo QuoteRepository) error {
+		// 1. CREATE THE QUOTE FIRST
+		if err := txRepo.Create(ctx, quote); err != nil {
+			return fmt.Errorf("failed to create quote: %w", err)
+		}
+
+		// 2. Supersede existing proposed quotes
 		for _, existingQuote := range existingQuotes {
 			if existingQuote.State == QuoteProposed {
 				existingQuote.State = QuoteSuperseded

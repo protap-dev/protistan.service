@@ -32,11 +32,6 @@ type PaymentResponse struct {
 	ProcessedAt string  `json:"processed_at"`
 }
 
-// Topics - Payment service OWNS these topics
-var PaymentConfirmedTopic = topics_payment.PaymentConfirmedTopic
-
-var PaymentFailedTopic = topics_payment.PaymentFailedTopic
-
 // CreatePayment processes a payment
 //
 //encore:api auth method=POST path=/v1/payments
@@ -77,7 +72,7 @@ func CreatePayment(ctx context.Context, req *PaymentRequest) (*PaymentResponse, 
 			},
 		}
 
-		_, err := PaymentConfirmedTopic.Publish(ctx, envelope)
+		_, err := topics_payment.PaymentConfirmedTopic.Publish(ctx, envelope)
 		if err != nil {
 			return nil, err
 		}
@@ -116,7 +111,7 @@ func CreatePayment(ctx context.Context, req *PaymentRequest) (*PaymentResponse, 
 		},
 	}
 
-	_, err := PaymentFailedTopic.Publish(ctx, envelope)
+	_, err := topics_payment.PaymentFailedTopic.Publish(ctx, envelope)
 	if err != nil {
 		return nil, err
 	}
@@ -161,7 +156,7 @@ func SimulatePaymentSuccess(ctx context.Context, req *PaymentRequest) (*PaymentR
 		},
 	}
 
-	_, err := PaymentConfirmedTopic.Publish(ctx, envelope)
+	_, err := topics_payment.PaymentConfirmedTopic.Publish(ctx, envelope)
 	return response, err
 }
 
