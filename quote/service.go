@@ -93,27 +93,6 @@ func initService() (*Service, error) {
 	return serviceInstance, initErr
 }
 
-// QuoteRequest represents a quote request
-type QuoteRequest struct {
-	BookingID             string `json:"booking_id"`
-	EstimatedDurationMins int    `json:"estimated_duration_mins"`
-	ServiceCategoryID     string `json:"service_category_id"`
-}
-
-// AcceptQuoteRequest represents accepting a quote
-type AcceptQuoteRequest struct {
-	BookingID string `json:"booking_id"`
-}
-
-// QuoteResponse represents a quote
-type QuoteResponse struct {
-	ID        string  `json:"id"`
-	BookingID string  `json:"booking_id"`
-	Amount    float64 `json:"amount"`
-	Currency  string  `json:"currency"`
-	Status    string  `json:"status"`
-}
-
 // ProposeQuote creates and proposes a quote for a booking
 //
 //encore:api auth method=POST path=/v0/quote
@@ -123,6 +102,17 @@ func ProposeQuote(ctx context.Context, req *handlers.ProposeQuoteRequest) (*hand
 		return nil, err
 	}
 	return svc.QuotesHandler.ProposeQuote(ctx, req)
+}
+
+// GetQuote retrieves a quote by its ID
+//
+//encore:api auth method=GET path=/v0/quote/item/:id
+func GetQuote(ctx context.Context, id string) (*handlers.QuoteResponse, error) {
+	svc, err := initService()
+	if err != nil {
+		return nil, err
+	}
+	return svc.QuotesHandler.GetQuote(ctx, id)
 }
 
 // AcceptQuote accepts a proposed quote
@@ -149,7 +139,7 @@ func RejectQuote(ctx context.Context, id string, req *handlers.RejectQuoteReques
 
 // ListQuotesByBooking lists all quotes for a booking
 //
-//encore:api auth method=GET path=/v0/quote/booking/:bookingID
+//encore:api auth method=GET path=/v0/quote/for-booking/:bookingID
 func ListQuotesByBooking(ctx context.Context, bookingID string) (*handlers.ListQuotesResponse, error) {
 	svc, err := initService()
 	if err != nil {

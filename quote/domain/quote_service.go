@@ -34,8 +34,8 @@ func (s *QuoteService) ProposeQuote(ctx context.Context, input *ProposeQuoteInpu
 	if len(input.Breakdown) > 0 {
 		breakdownJSON, err = json.Marshal(input.Breakdown)
 		if err != nil {
-			return nil, fmt.Errorf("failed to marshal breakdown: %w", err)
-		}
+		return nil, fmt.Errorf("failed to marshal breakdown: %w", err)
+	}
 	}
 
 	// Default currency
@@ -51,16 +51,14 @@ func (s *QuoteService) ProposeQuote(ctx context.Context, input *ProposeQuoteInpu
 	}
 
 	// Get existing quotes to determine version
-	existingQuotes, err := s.repo.GetByBookingID(ctx, input.BookingID)
+	latestQuote, err := s.repo.GetLatestQuoteByBookingID(ctx, input.BookingID)
 	if err != nil {
 		return nil, fmt.Errorf("failed to check existing quotes: %w", err)
 	}
 
 	version := 1
-	for _, q := range existingQuotes {
-		if q.Version >= version {
-			version = q.Version + 1
-		}
+	if latestQuote != nil {
+		version = latestQuote.Version + 1
 	}
 
 	// Create quote
@@ -89,9 +87,14 @@ func (s *QuoteService) ProposeQuote(ctx context.Context, input *ProposeQuoteInpu
 			return fmt.Errorf("failed to create quote: %w", err)
 		}
 
-		// 2. Supersede existing proposed quotes
+		// 2. Supersede all non-terminal quotes
+		existingQuotes, err := txRepo.GetByBookingID(ctx, input.BookingID)
+		if err != nil {
+			return fmt.Errorf("failed to get existing quotes: %w", err)
+		}
+
 		for _, existingQuote := range existingQuotes {
-			if existingQuote.State == QuoteProposed {
+			if !existingQuote.State.IsTerminal() && existingQuote.ID != quote.ID {
 				existingQuote.State = QuoteSuperseded
 				existingQuote.UpdatedAt = now
 				if err := txRepo.Update(ctx, existingQuote); err != nil {

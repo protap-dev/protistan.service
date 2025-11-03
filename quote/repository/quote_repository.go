@@ -46,7 +46,7 @@ func (r *QuoteRepository) Update(ctx context.Context, quote *domain.Quote) error
 	result := r.db.WithContext(ctx).
 		Model(&domain.Quote{}).
 		Where("id = ? AND db_version = ?", quote.ID, quote.DBVersion).
-		Updates(map[string]interface{}{
+		Updates(map[string]any{
 			"state":                   quote.State,
 			"amount_cents":            quote.AmountCents,
 			"currency":                quote.Currency,
@@ -103,6 +103,24 @@ func (r *QuoteRepository) GetByBookingID(ctx context.Context, bookingID string) 
 	}
 
 	return quotes, nil
+}
+
+// GetLatestQuoteByBookingID retrieves the latest version of a quote for a booking
+func (r *QuoteRepository) GetLatestQuoteByBookingID(ctx context.Context, bookingID string) (*domain.Quote, error) {
+	var quote domain.Quote
+	result := r.db.WithContext(ctx).
+		Where("booking_id = ?", bookingID).
+		Order("version DESC").
+		First(&quote)
+
+	if result.Error != nil {
+		if errors.Is(result.Error, gorm.ErrRecordNotFound) {
+			return nil, nil // Return nil, nil if no quote is found
+		}
+		return nil, fmt.Errorf("failed to get latest quote by booking ID: %w", result.Error)
+	}
+
+	return &quote, nil
 }
 
 // GetByIDForUpdate retrieves a quote with row-level lock (FOR UPDATE)
@@ -182,10 +200,9 @@ func (r *QuoteRepository) CreateEventInOutbox(ctx context.Context, event *domain
 
 	// Create outbox entry
 	outboxEvent := &corerepo.OutboxEvent{
-		Topic:       topic,
-		Data:        eventData,
-		InsertedAt:  time.Now(),
-		ProcessedAt: nil,
+		Topic:      topic,
+		Data:       eventData,
+		InsertedAt: time.Now(),
 	}
 
 	result := r.coreDB.WithContext(ctx).Create(outboxEvent)

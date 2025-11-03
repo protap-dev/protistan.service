@@ -161,12 +161,52 @@ func (h *QuotesHandler) ProposeQuote(ctx context.Context, req *ProposeQuoteReque
 
 	// 7. Clear any cached data
 	h.clearQuoteCache(ctx, quote.ID)
+	h.clearBookingQuotesCache(ctx, quote.BookingID)
 
 	h.logger.Info(ctx, "quote proposed successfully", map[string]interface{}{
 		"quote_id":   quote.ID,
 		"booking_id": quote.BookingID,
 		"version":    quote.Version,
 	})
+
+	return toQuoteResponse(quote), nil
+}
+
+// GetQuote retrieves a single quote by ID
+func (h *QuotesHandler) GetQuote(ctx context.Context, id string) (*QuoteResponse, error) {
+	h.logger.Info(ctx, "getting quote", map[string]any{"quote_id": id})
+
+	// 1. Check cache first
+	cacheKey := fmt.Sprintf("quote:%s", id)
+	if cached, found := h.cache.Get(ctx, cacheKey); found {
+		if quote, ok := cached.(*quotedomain.Quote); ok {
+			h.logger.Info(ctx, "quote found in cache", map[string]any{"quote_id": id})
+			return toQuoteResponse(quote), nil
+		}
+	}
+
+	// 2. Get quote from repository
+	quote, err := h.repo.GetByID(ctx, id)
+	if err != nil {
+		h.logger.Error(ctx, "failed to get quote", err, map[string]any{"quote_id": id})
+		return nil, errs.B().Code(errs.NotFound).Msg("quote not found").Err()
+	}
+
+	// 3. Authorize access
+	userCtx, err := h.authHelper.ExtractUserContext(ctx, "get_quote")
+	if err != nil {
+		return nil, err
+	}
+	bookingResp, err := booking.GetBooking(ctx, quote.BookingID)
+	if err != nil {
+		return nil, errs.B().Code(errs.NotFound).Msg("booking not found	").Err()
+	}
+	if err := qinternal.AuthorizeListQuotes(ctx, userCtx.ID, bookingResp.CustomerID, bookingResp.ArtisanID); err != nil {
+		return nil, err
+	}
+
+	// 4. Cache the quote
+	h.cache.Set(ctx, cacheKey, quote, 1*time.Hour)
 
 	return toQuoteResponse(quote), nil
 }
@@ -263,5 +303,11 @@ func toQuoteResponse(quote *quotedomain.Quote) *QuoteResponse {
 // clearQuoteCache clears cached quote data
 func (h *QuotesHandler) clearQuoteCache(ctx context.Context, quoteID string) {
 	cacheKey := fmt.Sprintf("quote:%s", quoteID)
+	h.cache.Delete(ctx, cacheKey)
+}
+
+// clearBookingQuotesCache clears the cache for a list of quotes for a booking
+func (h *QuotesHandler) clearBookingQuotesCache(ctx context.Context, bookingID string) {
+	cacheKey := fmt.Sprintf("quotes:booking:%s", bookingID)
 	h.cache.Delete(ctx, cacheKey)
 }

@@ -68,17 +68,6 @@ func (q *Quote) CanTransitionTo(target QuoteState) bool {
 // QuoteEvent represents a quote state change event
 type QuoteEvent = eventscommon.QuoteEvent
 
-// OutboxEvent represents event in outbox table
-type OutboxEvent struct {
-	ID          int64      `json:"id" gorm:"primaryKey;autoIncrement"`
-	Topic       string     `json:"topic" gorm:"type:text;not null"`
-	Data        []byte     `json:"data" gorm:"type:jsonb;not null"`
-	InsertedAt  time.Time  `json:"inserted_at" gorm:"not null"`
-	ProcessedAt *time.Time `json:"processed_at"`
-	RetryCount  int        `json:"retry_count" gorm:"default:0"`
-	LastError   *string    `json:"last_error,omitempty" gorm:"type:text"`
-}
-
 // QuoteRepository defines repository interface
 type QuoteRepository interface {
 	// Basic CRUD
@@ -87,6 +76,7 @@ type QuoteRepository interface {
 	GetByID(ctx context.Context, id string) (*Quote, error)
 	GetByIDForUpdate(ctx context.Context, id string) (*Quote, error)
 	GetByBookingID(ctx context.Context, bookingID string) ([]*Quote, error)
+	GetLatestQuoteByBookingID(ctx context.Context, bookingID string) (*Quote, error)
 
 	// Query operations
 	FindExpiredQuotes(ctx context.Context) ([]*Quote, error)

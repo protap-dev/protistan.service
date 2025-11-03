@@ -89,6 +89,7 @@ func (h *QuotesHandler) RejectQuote(ctx context.Context, id string, req *RejectQ
 
 	// 8. Clear cache
 	h.clearQuoteCache(ctx, updatedQuote.ID)
+	h.clearBookingQuotesCache(ctx, updatedQuote.BookingID)
 
 	h.logger.Info(ctx, "quote rejected successfully", map[string]any{
 		"quote_id":    updatedQuote.ID,
