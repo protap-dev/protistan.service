@@ -28,10 +28,6 @@ var (
 		DeliveryGuarantee: pubsub.AtLeastOnce,
 	})
 
-	// AssignedTopic publishes booking assignment events
-	AssignedTopic = pubsub.NewTopic[eventscommon.EventEnvelope[domain.BookingEvent]]("booking-assigned", pubsub.TopicConfig{
-		DeliveryGuarantee: pubsub.AtLeastOnce,
-	})
 
 	// OfferRejectedTopic publishes offer rejection events
 	OfferRejectedTopic = pubsub.NewTopic[eventscommon.EventEnvelope[domain.BookingEvent]]("booking-offer-rejected", pubsub.TopicConfig{

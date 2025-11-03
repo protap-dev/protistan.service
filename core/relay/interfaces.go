@@ -17,7 +17,7 @@ type EventData interface {
 
 // Processor handles the core event processing logic
 type Processor interface {
-	GetUnprocessedEvents(ctx context.Context, db *gorm.DB, batchSize int) ([]*repository.OutboxEvent, error)
+	GetUnprocessedEvents(ctx context.Context, db *gorm.DB, batchSize int, topicPrefix string) ([]*repository.OutboxEvent, error)
 	MarkEventProcessed(ctx context.Context, db *gorm.DB, eventID string, processedAt *time.Time) error
 }
 

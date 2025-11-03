@@ -3,6 +3,7 @@ package booking
 import (
 	"context"
 	"fmt"
+	"log"
 	"sync"
 
 	"encore.app/booking/domain"
@@ -242,8 +243,9 @@ var _ = pubsub.NewSubscription(
 
 var _ = pubsub.NewSubscription(
 	topics_quote.QuoteProposedTopic, "handle-quote-proposed",
-	pubsub.SubscriptionConfig[eventscommon.EventEnvelope[eventscommon.QuoteEvent]]{ // Remove pointer here
-		Handler: func(ctx context.Context, envelope eventscommon.EventEnvelope[eventscommon.QuoteEvent]) error { // Remove pointer here too
+	pubsub.SubscriptionConfig[eventscommon.EventEnvelope[eventscommon.QuoteEvent]]{
+		Handler: func(ctx context.Context, envelope eventscommon.EventEnvelope[eventscommon.QuoteEvent]) error {
+
 			ctx = eventscommon.WithEventMetadata(ctx, &binternal.EventMetadata{
 				CorrelationID: envelope.CorrelationID,
 				CausationID:   envelope.EventID,
@@ -254,7 +256,8 @@ var _ = pubsub.NewSubscription(
 			if err != nil {
 				return err
 			}
-			return s.OnQuoteProposed(ctx, &envelope.Data)
+			result := s.OnQuoteProposed(ctx, &envelope.Data)
+			return result
 		},
 	},
 )
@@ -275,9 +278,12 @@ func convertToDomainEvent(commonEvent *eventscommon.BookingEvent) *domain.Bookin
 func (s *Service) OnQuoteProposed(ctx context.Context, quoteEvent *eventscommon.QuoteEvent) error {
 	current, err := s.bookingsHandler.GetRepository().GetByID(ctx, quoteEvent.BookingID)
 	if err != nil {
+		log.Printf("[ERROR] Failed to get booking %s in OnQuoteProposed: %v",
+			quoteEvent.BookingID, err)
 		return err
 	}
-	return s.bookingsHandler.UpdateBookingStatusInternal(
+
+	err = s.bookingsHandler.UpdateBookingStatusInternal(
 		ctx,
 		quoteEvent.BookingID,
 		domain.BookingQuoteProposed,
@@ -285,6 +291,13 @@ func (s *Service) OnQuoteProposed(ctx context.Context, quoteEvent *eventscommon.
 		nil,
 		current,
 	)
+
+	if err != nil {
+		log.Printf("[ERROR] Failed to update booking %s to quote_proposed: %v",
+			quoteEvent.BookingID, err)
+		return err
+	}
+	return nil
 }
 
 func (s *Service) OnQuoteAccepted(ctx context.Context, quoteEvent *eventscommon.QuoteEvent) error {

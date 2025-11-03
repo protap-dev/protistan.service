@@ -15,16 +15,17 @@ import (
 // Relay handles reading events from the outbox table and publishing them to topics
 // This is the core generic implementation that all services can use
 type Relay[EventType EventData] struct {
-	db        *gorm.DB
-	config    Config
-	publisher Publisher[EventType]
-	processor Processor
-	cleanup   Cleanup
-	metrics   *Metrics
-	mu        sync.RWMutex
-	stopping  bool
-	stopCh    chan struct{}
-	wg        sync.WaitGroup
+	db          *gorm.DB
+	config      Config
+	publisher   Publisher[EventType]
+	processor   Processor
+	cleanup     Cleanup
+	metrics     *Metrics
+	mu          sync.RWMutex
+	stopping    bool
+	stopCh      chan struct{}
+	wg          sync.WaitGroup
+	topicPrefix string
 }
 
 // NewRelay creates a new relay instance with modular components
@@ -34,15 +35,17 @@ func NewRelay[EventType EventData](
 	processor Processor,
 	cleanup Cleanup,
 	config Config,
+	topicPrefix string,
 ) *Relay[EventType] {
 	return &Relay[EventType]{
-		db:        db,
-		config:    config,
-		publisher: publisher,
-		processor: processor,
-		cleanup:   cleanup,
-		metrics:   NewMetrics(),
-		stopCh:    make(chan struct{}),
+		db:          db,
+		config:      config,
+		publisher:   publisher,
+		processor:   processor,
+		cleanup:     cleanup,
+		metrics:     NewMetrics(),
+		stopCh:      make(chan struct{}),
+		topicPrefix: topicPrefix,
 	}
 }
 
@@ -100,7 +103,7 @@ func (r *Relay[EventType]) processBatch(ctx context.Context) error {
 	start := time.Now()
 
 	// Get unprocessed events from outbox table
-	events, err := r.processor.GetUnprocessedEvents(ctx, r.db, r.config.BatchSize)
+	events, err := r.processor.GetUnprocessedEvents(ctx, r.db, r.config.BatchSize, r.topicPrefix)
 	if err != nil {
 		return fmt.Errorf("failed to get unprocessed events: %w", err)
 	}

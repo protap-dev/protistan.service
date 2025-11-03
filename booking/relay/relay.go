@@ -19,9 +19,10 @@ func NewRelay(db *gorm.DB, config relay.Config) *Relay {
 	publisher := &BookingPublisher{}
 	processor := &relay.DefaultProcessor{}
 	cleanup := &relay.DefaultCleanup{}
+	topicPrefix := "booking"
 
 	// Create the core relay with booking-specific types
-	coreRelay := relay.NewRelay(db, publisher, processor, cleanup, config)
+	coreRelay := relay.NewRelay(db, publisher, processor, cleanup, config, topicPrefix)
 
 	return &Relay{
 		coreRelay: coreRelay,

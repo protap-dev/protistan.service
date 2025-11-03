@@ -189,7 +189,7 @@ func TestRelayComponentIntegration(t *testing.T) {
 	}()
 
 	// Test core relay creation with typed publisher
-	_ = corerelay.NewRelay(nil, publisher, processor, cleanup, config)
+	_ = corerelay.NewRelay(nil, publisher, processor, cleanup, config, "booking")
 
 	t.Log("Relay component integration test completed")
 }
@@ -217,7 +217,7 @@ func TestRelayConfiguration(t *testing.T) {
 	processor := &corerelay.DefaultProcessor{}
 	cleanup := &corerelay.DefaultCleanup{}
 
-	_ = corerelay.NewRelay(nil, publisher, processor, cleanup, customConfig)
+	_ = corerelay.NewRelay(nil, publisher, processor, cleanup, customConfig, "booking")
 
 	t.Log("Relay configuration test completed")
 }
@@ -294,7 +294,7 @@ func TestProcessorEventHandling(t *testing.T) {
 	}()
 
 	// This will fail without a real DB, but we verify it doesn't panic unexpectedly
-	_, err := processor.GetUnprocessedEvents(context.Background(), nil, 10)
+	_, err := processor.GetUnprocessedEvents(context.Background(), nil, 10, "booking")
 	if err != nil {
 		t.Logf("Expected error without database: %v", err)
 	}

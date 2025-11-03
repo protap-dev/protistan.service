@@ -76,7 +76,7 @@ type QuoteRepository interface {
 	GetByID(ctx context.Context, id string) (*Quote, error)
 	GetByIDForUpdate(ctx context.Context, id string) (*Quote, error)
 	GetByBookingID(ctx context.Context, bookingID string) ([]*Quote, error)
-	GetLatestQuoteByBookingID(ctx context.Context, bookingID string) (*Quote, error)
+	GetLatestVersionByBookingID(ctx context.Context, bookingID string) (int, error)
 
 	// Query operations
 	FindExpiredQuotes(ctx context.Context) ([]*Quote, error)

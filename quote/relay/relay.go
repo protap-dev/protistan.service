@@ -19,9 +19,10 @@ func NewRelay(db *gorm.DB, config relay.Config) *Relay {
 	publisher := &QuotePublisher{}
 	processor := &relay.DefaultProcessor{}
 	cleanup := &relay.DefaultCleanup{}
+	topicPrefix := "quote-"
 
 	// Create the core relay with quote-specific types
-	coreRelay := relay.NewRelay(db, publisher, processor, cleanup, config)
+	coreRelay := relay.NewRelay(db, publisher, processor, cleanup, config, topicPrefix)
 
 	return &Relay{
 		coreRelay: coreRelay,

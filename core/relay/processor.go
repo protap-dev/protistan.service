@@ -12,25 +12,27 @@ import (
 type DefaultProcessor struct{}
 
 // GetUnprocessedEvents retrieves events from outbox that haven't been processed yet
-func (p *DefaultProcessor) GetUnprocessedEvents(ctx context.Context, db *gorm.DB, batchSize int) ([]*repository.OutboxEvent, error) {
+func (p *DefaultProcessor) GetUnprocessedEvents(ctx context.Context, db *gorm.DB, batchSize int, topicPrefix string) ([]*repository.OutboxEvent, error) {
 	var events []*repository.OutboxEvent
-
 	now := time.Now()
 
-	err := db.WithContext(ctx).
+	query := db.WithContext(ctx).
 		Model(&repository.OutboxEvent{}).
 		Where("processed_at IS NULL").
 		Where("status IN (?)", []string{"pending", "processing"}).
-		Where("(next_retry_at IS NULL OR next_retry_at <= ?)", now).
+		Where("(next_retry_at IS NULL OR next_retry_at <= ?)", now)
+
+	//  Topic filtering
+	if topicPrefix != "" {
+		query = query.Where("topic LIKE ?", topicPrefix+"%")
+	}
+
+	err := query.
 		Order("inserted_at ASC").
 		Limit(batchSize).
 		Find(&events).Error
 
-	if err != nil {
-		return nil, err
-	}
-
-	return events, nil
+	return events, err
 }
 
 // MarkEventProcessed marks an event as processed with timestamp (audit trail)

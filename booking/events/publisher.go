@@ -5,6 +5,8 @@ import (
 	"log"
 
 	"encore.app/booking/domain"
+	eventscommon "encore.app/core/events"
+	topics_booking "encore.app/core/events/topics/booking"
 )
 
 // eventPublisher implements the domain.EventPublisher interface.
@@ -54,8 +56,18 @@ func (e *eventPublisher) PublishOfferCreatedEvent(ctx context.Context, event *do
 
 // PublishAssignedEvent publishes when an artisan is assigned to a booking.
 func (e *eventPublisher) PublishAssignedEvent(ctx context.Context, event *domain.BookingEvent) {
-	envelope := CreateEventEnvelope(ctx, "booking.assigned", *event)
-	_, err := AssignedTopic.Publish(ctx, *envelope)
+	commonEvent := eventscommon.BookingEvent{
+		BookingID:      event.BookingID,
+		Status:         string(event.Status),
+		PreviousStatus: string(event.PreviousStatus),
+		Timestamp:      event.Timestamp,
+		UserID:         event.UserID,
+		ArtisanID:      event.ArtisanID,
+		Reason:         event.Reason,
+		Metadata:       event.Metadata,
+	}
+	envelope := CreateEventEnvelope(ctx, "booking.assigned", commonEvent)
+	_, err := topics_booking.BookingAssignedTopic.Publish(ctx, *envelope)
 	if err != nil {
 		log.Printf("ERROR: failed to publish assigned event: %v", err)
 	}

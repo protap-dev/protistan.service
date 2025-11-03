@@ -34,8 +34,8 @@ func (s *QuoteService) ProposeQuote(ctx context.Context, input *ProposeQuoteInpu
 	if len(input.Breakdown) > 0 {
 		breakdownJSON, err = json.Marshal(input.Breakdown)
 		if err != nil {
-		return nil, fmt.Errorf("failed to marshal breakdown: %w", err)
-	}
+			return nil, fmt.Errorf("failed to marshal breakdown: %w", err)
+		}
 	}
 
 	// Default currency
@@ -50,38 +50,36 @@ func (s *QuoteService) ProposeQuote(ctx context.Context, input *ProposeQuoteInpu
 		validUntil = &defaultExpiry
 	}
 
-	// Get existing quotes to determine version
-	latestQuote, err := s.repo.GetLatestQuoteByBookingID(ctx, input.BookingID)
-	if err != nil {
-		return nil, fmt.Errorf("failed to check existing quotes: %w", err)
-	}
-
-	version := 1
-	if latestQuote != nil {
-		version = latestQuote.Version + 1
-	}
-
-	// Create quote
-	now := time.Now()
-	quote := &Quote{
-		BookingID:             input.BookingID,
-		Version:               version,
-		State:                 QuoteProposed,
-		AmountCents:           input.AmountCents,
-		Currency:              input.Currency,
-		Breakdown:             breakdownJSON,
-		Notes:                 input.Notes,
-		EstimatedDurationMins: input.EstimatedDurationMins,
-		ValidUntil:            validUntil,
-		ProposedBy:            input.ProposedBy,
-		ProposedAt:            now,
-		CreatedAt:             now,
-		UpdatedAt:             now,
-		DBVersion:             1,
-	}
-
+	var quote *Quote
 	// Save in transaction
 	err = s.repo.WithTransaction(ctx, func(txRepo QuoteRepository) error {
+		// Get latest version number
+		maxVersion, err := txRepo.GetLatestVersionByBookingID(ctx, input.BookingID)
+		if err != nil {
+			return fmt.Errorf("failed to check latest version: %w", err)
+		}
+
+		version := maxVersion + 1
+
+		// Create quote
+		now := time.Now()
+		quote = &Quote{
+			BookingID:             input.BookingID,
+			Version:               version,
+			State:                 QuoteProposed,
+			AmountCents:           input.AmountCents,
+			Currency:              input.Currency,
+			Breakdown:             breakdownJSON,
+			Notes:                 input.Notes,
+			EstimatedDurationMins: input.EstimatedDurationMins,
+			ValidUntil:            validUntil,
+			ProposedBy:            input.ProposedBy,
+			ProposedAt:            now,
+			CreatedAt:             now,
+			UpdatedAt:             now,
+			DBVersion:             1,
+		}
+
 		// 1. CREATE THE QUOTE FIRST
 		if err := txRepo.Create(ctx, quote); err != nil {
 			return fmt.Errorf("failed to create quote: %w", err)

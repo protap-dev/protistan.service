@@ -105,22 +105,20 @@ func (r *QuoteRepository) GetByBookingID(ctx context.Context, bookingID string) 
 	return quotes, nil
 }
 
-// GetLatestQuoteByBookingID retrieves the latest version of a quote for a booking
-func (r *QuoteRepository) GetLatestQuoteByBookingID(ctx context.Context, bookingID string) (*domain.Quote, error) {
-	var quote domain.Quote
+// GetLatestVersionByBookingID retrieves only the latest version number for a booking
+func (r *QuoteRepository) GetLatestVersionByBookingID(ctx context.Context, bookingID string) (int, error) {
+	var maxVersion int
 	result := r.db.WithContext(ctx).
+		Model(&domain.Quote{}).
 		Where("booking_id = ?", bookingID).
-		Order("version DESC").
-		First(&quote)
+		Select("COALESCE(MAX(version), 0)").
+		Scan(&maxVersion)
 
 	if result.Error != nil {
-		if errors.Is(result.Error, gorm.ErrRecordNotFound) {
-			return nil, nil // Return nil, nil if no quote is found
-		}
-		return nil, fmt.Errorf("failed to get latest quote by booking ID: %w", result.Error)
+		return 0, fmt.Errorf("failed to get latest version by booking ID: %w", result.Error)
 	}
 
-	return &quote, nil
+	return maxVersion, nil
 }
 
 // GetByIDForUpdate retrieves a quote with row-level lock (FOR UPDATE)
