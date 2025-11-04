@@ -21,7 +21,7 @@ import (
 
 // Helper function to create and wrap event in envelope
 func publishEventToOutbox(ctx context.Context, tx *sqldb.Tx, event domain.BookingEvent, eventType string) (string, error) {
-	topicRef := pubsub.TopicRef[pubsub.Publisher[*events.EventEnvelope[domain.BookingEvent]]](events.StatusTopic)
+	topicRef := pubsub.TopicRef[pubsub.Publisher[*events.EventEnvelope[domain.BookingEvent]]](events.OfferedTopic)
 	outboxRef := outbox.Bind(topicRef, outbox.TxPersister(tx))
 
 	envelope := events.CreateEventEnvelope(ctx, eventType, event)
@@ -107,7 +107,7 @@ func TestOutboxPublishAndBind(t *testing.T) {
 	require.NoError(t, err)
 	defer tx.Rollback()
 
-	topicRef := pubsub.TopicRef[pubsub.Publisher[*events.EventEnvelope[domain.BookingEvent]]](events.StatusTopic)
+	topicRef := pubsub.TopicRef[pubsub.Publisher[*events.EventEnvelope[domain.BookingEvent]]](events.OfferedTopic)
 	outboxRef := outbox.Bind(topicRef, outbox.TxPersister(tx))
 
 	testEvents := []domain.BookingEvent{
@@ -152,12 +152,12 @@ func TestRelayRegistration(t *testing.T) {
 	relay := outbox.NewRelay(outbox.SQLDBStore(testDB))
 	require.NotNil(t, relay)
 
-	statusTopicRef := pubsub.TopicRef[pubsub.Publisher[*events.EventEnvelope[domain.BookingEvent]]](events.StatusTopic)
-	createdTopicRef := pubsub.TopicRef[pubsub.Publisher[*events.EventEnvelope[domain.BookingEvent]]](events.CreatedTopic)
+	OfferedTopicRef := pubsub.TopicRef[pubsub.Publisher[*events.EventEnvelope[domain.BookingEvent]]](events.OfferedTopic)
+	RematchTopicRef := pubsub.TopicRef[pubsub.Publisher[*events.EventEnvelope[domain.BookingEvent]]](events.RematchTopic)
 	cancelledTopicRef := pubsub.TopicRef[pubsub.Publisher[*events.EventEnvelope[domain.BookingEvent]]](events.CancelledTopic)
 
-	outbox.RegisterTopic(relay, statusTopicRef)
-	outbox.RegisterTopic(relay, createdTopicRef)
+	outbox.RegisterTopic(relay, OfferedTopicRef)
+	outbox.RegisterTopic(relay, RematchTopicRef)
 	outbox.RegisterTopic(relay, cancelledTopicRef)
 
 	t.Log("✓ Successfully registered 3 topics with relay")
@@ -173,7 +173,7 @@ func TestRelayProcessMessages(t *testing.T) {
 	tx, err := testDB.Begin(ctx)
 	require.NoError(t, err)
 
-	topicRef := pubsub.TopicRef[pubsub.Publisher[*events.EventEnvelope[domain.BookingEvent]]](events.StatusTopic)
+	topicRef := pubsub.TopicRef[pubsub.Publisher[*events.EventEnvelope[domain.BookingEvent]]](events.OfferedTopic)
 	outboxRef := outbox.Bind(topicRef, outbox.TxPersister(tx))
 
 	messageCount := 10
@@ -214,7 +214,7 @@ func TestRelayPollForMessages(t *testing.T) {
 	tx, err := testDB.Begin(ctx)
 	require.NoError(t, err)
 
-	topicRef := pubsub.TopicRef[pubsub.Publisher[*events.EventEnvelope[domain.BookingEvent]]](events.StatusTopic)
+	topicRef := pubsub.TopicRef[pubsub.Publisher[*events.EventEnvelope[domain.BookingEvent]]](events.OfferedTopic)
 	outboxRef := outbox.Bind(topicRef, outbox.TxPersister(tx))
 
 	messageCount := 5
@@ -275,7 +275,7 @@ func TestRelayLoadPerformance(t *testing.T) {
 	tx, err := testDB.Begin(ctx)
 	require.NoError(t, err)
 
-	topicRef := pubsub.TopicRef[pubsub.Publisher[*events.EventEnvelope[domain.BookingEvent]]](events.StatusTopic)
+	topicRef := pubsub.TopicRef[pubsub.Publisher[*events.EventEnvelope[domain.BookingEvent]]](events.OfferedTopic)
 	outboxRef := outbox.Bind(topicRef, outbox.TxPersister(tx))
 
 	for range messageCount {
@@ -330,7 +330,7 @@ func TestConcurrentPublishToOutbox(t *testing.T) {
 	var successCount atomic.Int32
 	var errorCount atomic.Int32
 
-	topicRef := pubsub.TopicRef[pubsub.Publisher[*events.EventEnvelope[domain.BookingEvent]]](events.StatusTopic)
+	topicRef := pubsub.TopicRef[pubsub.Publisher[*events.EventEnvelope[domain.BookingEvent]]](events.OfferedTopic)
 
 	for i := 0; i < goroutineCount; i++ {
 		go func(goroutineID int) {
@@ -391,9 +391,9 @@ func TestOutboxMultipleTopics(t *testing.T) {
 	require.NoError(t, err)
 	defer tx.Rollback()
 
-	// Bind and publish to StatusTopic
-	statusTopicRef := pubsub.TopicRef[pubsub.Publisher[*events.EventEnvelope[domain.BookingEvent]]](events.StatusTopic)
-	statusOutbox := outbox.Bind(statusTopicRef, outbox.TxPersister(tx))
+	// Bind and publish to OfferedTopic
+	OfferedTopicRef := pubsub.TopicRef[pubsub.Publisher[*events.EventEnvelope[domain.BookingEvent]]](events.OfferedTopic)
+	statusOutbox := outbox.Bind(OfferedTopicRef, outbox.TxPersister(tx))
 
 	statusEvent := domain.BookingEvent{
 		BookingID: uuid.New().String(),
@@ -405,9 +405,9 @@ func TestOutboxMultipleTopics(t *testing.T) {
 	require.NoError(t, err)
 	require.NotEmpty(t, statusMsgID)
 
-	// Bind and publish to CreatedTopic
-	createdTopicRef := pubsub.TopicRef[pubsub.Publisher[*events.EventEnvelope[domain.BookingEvent]]](events.CreatedTopic)
-	createdOutbox := outbox.Bind(createdTopicRef, outbox.TxPersister(tx))
+	// Bind and publish to RematchTopic
+	RematchTopicRef := pubsub.TopicRef[pubsub.Publisher[*events.EventEnvelope[domain.BookingEvent]]](events.RematchTopic)
+	createdOutbox := outbox.Bind(RematchTopicRef, outbox.TxPersister(tx))
 
 	createdEvent := domain.BookingEvent{
 		BookingID: uuid.New().String(),
@@ -436,7 +436,7 @@ func TestRelayRetryOnFailure(t *testing.T) {
 	tx, err := testDB.Begin(ctx)
 	require.NoError(t, err)
 
-	topicRef := pubsub.TopicRef[pubsub.Publisher[*events.EventEnvelope[domain.BookingEvent]]](events.StatusTopic)
+	topicRef := pubsub.TopicRef[pubsub.Publisher[*events.EventEnvelope[domain.BookingEvent]]](events.OfferedTopic)
 	outboxRef := outbox.Bind(topicRef, outbox.TxPersister(tx))
 
 	messageCount := 5
@@ -530,7 +530,7 @@ func TestRelayMessageOrdering(t *testing.T) {
 	// to ensure clear ordering
 	messageCount := 20
 
-	topicRef := pubsub.TopicRef[pubsub.Publisher[*events.EventEnvelope[domain.BookingEvent]]](events.StatusTopic)
+	topicRef := pubsub.TopicRef[pubsub.Publisher[*events.EventEnvelope[domain.BookingEvent]]](events.OfferedTopic)
 
 	for i := range messageCount {
 		tx, err := testDB.Begin(ctx)
@@ -623,7 +623,7 @@ func TestOutboxCleanup(t *testing.T) {
 	tx, err := testDB.Begin(ctx)
 	require.NoError(t, err)
 
-	topicRef := pubsub.TopicRef[pubsub.Publisher[*events.EventEnvelope[domain.BookingEvent]]](events.StatusTopic)
+	topicRef := pubsub.TopicRef[pubsub.Publisher[*events.EventEnvelope[domain.BookingEvent]]](events.OfferedTopic)
 	outboxRef := outbox.Bind(topicRef, outbox.TxPersister(tx))
 
 	messageCount := 10

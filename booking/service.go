@@ -201,8 +201,8 @@ var _ = pubsub.NewSubscription(
 
 var _ = pubsub.NewSubscription(
 	topics_payment.PaymentConfirmedTopic, "handle-payment-confirmed",
-	pubsub.SubscriptionConfig[*eventscommon.EventEnvelope[eventscommon.BookingEvent]]{
-		Handler: func(ctx context.Context, envelope *eventscommon.EventEnvelope[eventscommon.BookingEvent]) error {
+	pubsub.SubscriptionConfig[*eventscommon.EventEnvelope[domain.BookingEvent]]{
+		Handler: func(ctx context.Context, envelope *eventscommon.EventEnvelope[domain.BookingEvent]) error {
 			domainEvent := convertToDomainEvent(&envelope.Data)
 
 			ctx = eventscommon.WithEventMetadata(ctx, &binternal.EventMetadata{
@@ -222,8 +222,8 @@ var _ = pubsub.NewSubscription(
 
 var _ = pubsub.NewSubscription(
 	topics_payment.PaymentFailedTopic, "handle-payment-failed",
-	pubsub.SubscriptionConfig[*eventscommon.EventEnvelope[eventscommon.BookingEvent]]{
-		Handler: func(ctx context.Context, envelope *eventscommon.EventEnvelope[eventscommon.BookingEvent]) error {
+	pubsub.SubscriptionConfig[*eventscommon.EventEnvelope[domain.BookingEvent]]{
+		Handler: func(ctx context.Context, envelope *eventscommon.EventEnvelope[domain.BookingEvent]) error {
 			domainEvent := convertToDomainEvent(&envelope.Data)
 
 			ctx = eventscommon.WithEventMetadata(ctx, &binternal.EventMetadata{
@@ -263,7 +263,7 @@ var _ = pubsub.NewSubscription(
 )
 
 // Helper function to convert common event to domain event
-func convertToDomainEvent(commonEvent *eventscommon.BookingEvent) *domain.BookingEvent {
+func convertToDomainEvent(commonEvent *domain.BookingEvent) *domain.BookingEvent {
 	return &domain.BookingEvent{
 		BookingID:      commonEvent.BookingID,
 		Status:         domain.BookingStatus(commonEvent.Status),

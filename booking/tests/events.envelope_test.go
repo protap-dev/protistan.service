@@ -263,7 +263,7 @@ func TestEventEnvelopePublishingThroughOutbox(t *testing.T) {
 	envelope := events.CreateEventEnvelope(ctx, "booking.created", event)
 
 	// Publish through outbox (event wrapped in envelope)
-	topicRef := pubsub.TopicRef[pubsub.Publisher[*events.EventEnvelope[domain.BookingEvent]]](events.StatusTopic)
+	topicRef := pubsub.TopicRef[pubsub.Publisher[*events.EventEnvelope[domain.BookingEvent]]](events.RematchTopic)
 	outboxRef := outbox.Bind(topicRef, outbox.TxPersister(tx))
 
 	msgID, err := outboxRef.Publish(ctx, envelope)
