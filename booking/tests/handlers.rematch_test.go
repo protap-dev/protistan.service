@@ -48,7 +48,7 @@ func setupRematchTest(t *testing.T) (*handlers.BookingsHandler, *gorm.DB, *mockP
 	}
 
 	// Create repository and handler
-	repo := repository.NewBookingRepository(gormDB)
+	repo := repository.NewBookingRepository(gormDB, gormDB)
 	handler := handlers.NewBookingsHandler(repo, validator, offerValidator, logger, cacheImpl, coreSvc, authHelper, publisher)
 
 	cleanup := func() {

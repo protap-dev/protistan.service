@@ -2,6 +2,8 @@ package booking
 
 import (
 	"context"
+	"fmt"
+	"log"
 	"sync"
 
 	"encore.app/booking/domain"
@@ -12,9 +14,11 @@ import (
 	"encore.app/booking/repository"
 	"encore.app/core"
 	"encore.app/core/cache"
+	coredb "encore.app/core/db"
 	eventscommon "encore.app/core/events"
-	"encore.app/payment"
-	"encore.app/quote"
+	topics_payment "encore.app/core/events/topics/payment"
+	topics_quote "encore.app/core/events/topics/quotes"
+	corerelay "encore.app/core/relay"
 	"encore.dev/cron"
 	"encore.dev/pubsub"
 	"encore.dev/storage/sqldb"
@@ -42,7 +46,7 @@ func initService() (*Service, error) {
 
 	serviceOnce.Do(func() {
 		// Initialize GORM connection
-		gormDB, err := gorm.Open(postgres.New(postgres.Config{
+		bookingGormDB, err := gorm.Open(postgres.New(postgres.Config{
 			Conn: BookingDB.Stdlib(),
 		}), &gorm.Config{})
 		if err != nil {
@@ -50,15 +54,23 @@ func initService() (*Service, error) {
 			return
 		}
 
+		coreGormDB, err := gorm.Open(postgres.New(postgres.Config{
+			Conn: coredb.ProtisanDB.Stdlib(), // Different connection to protisan core DB
+		}), &gorm.Config{})
+		if err != nil {
+			initErr = err
+			return
+		}
+
 		// Initialize core service
-		coreSvc := core.NewCoreService(gormDB)
+		coreSvc := core.NewCoreService(bookingGormDB)
 
 		// Initialize dependencies (SHARED across all requests)
 		logger := binternal.NewServiceLogger("booking")
 		authHelper := binternal.NewAuthHelper(logger)
 		validator := domain.NewBookingValidator()
 		offerValidator := domain.NewOfferValidator()
-		repo := repository.NewBookingRepository(coreSvc.DB())
+		repo := repository.NewBookingRepository(bookingGormDB, coreGormDB)
 		cache := cache.NewInMemoryCache() // SINGLE CACHE INSTANCE
 		publisher := events.NewEventPublisher()
 
@@ -66,7 +78,7 @@ func initService() (*Service, error) {
 		bookingsHandler := handlers.NewBookingsHandler(repo, validator, offerValidator, logger, cache, coreSvc, authHelper, publisher)
 
 		// Initialize outbox relay
-		relayConfig := relay.Config{
+		relayConfig := corerelay.Config{
 			PollingInterval: binternal.DefaultOutboxRelayConfig().PollingInterval,
 			BatchSize:       binternal.DefaultOutboxRelayConfig().BatchSize,
 			MaxRetries:      binternal.DefaultOutboxRelayConfig().MaxRetries,
@@ -74,7 +86,7 @@ func initService() (*Service, error) {
 			RetryMaxDelay:   binternal.DefaultOutboxRelayConfig().RetryMaxDelay,
 			AuditRetention:  binternal.DefaultOutboxRelayConfig().AuditRetention,
 		}
-		relayInstance := relay.NewOutboxRelay(coreSvc.DB(), publisher, relayConfig)
+		relayInstance := relay.NewOutboxRelay(coreGormDB, relayConfig)
 		go relayInstance.Start(context.Background())
 
 		serviceInstance = &Service{
@@ -150,13 +162,10 @@ func (s *Service) ListArtisanOffers(ctx context.Context, params *handlers.ListOf
 // =============================
 
 var _ = pubsub.NewSubscription(
-	quote.QuoteAcceptedTopic, "handle-quote-accepted",
-	pubsub.SubscriptionConfig[*eventscommon.EventEnvelope[eventscommon.BookingEvent]]{
-		Handler: func(ctx context.Context, envelope *eventscommon.EventEnvelope[eventscommon.BookingEvent]) error {
-			// Convert to domain event
-			domainEvent := convertToDomainEvent(&envelope.Data)
-
-			ctx = events.WithEventMetadata(ctx, &events.EventMetadata{
+	topics_quote.QuoteAcceptedTopic, "handle-quote-accepted",
+	pubsub.SubscriptionConfig[eventscommon.EventEnvelope[eventscommon.QuoteEvent]]{ // Remove pointer
+		Handler: func(ctx context.Context, envelope eventscommon.EventEnvelope[eventscommon.QuoteEvent]) error { // Remove pointer
+			ctx = eventscommon.WithEventMetadata(ctx, &binternal.EventMetadata{
 				CorrelationID: envelope.CorrelationID,
 				CausationID:   envelope.EventID,
 				UserID:        envelope.Data.UserID,
@@ -166,18 +175,16 @@ var _ = pubsub.NewSubscription(
 			if err != nil {
 				return err
 			}
-			return s.OnQuoteAccepted(ctx, domainEvent)
+			return s.OnQuoteAccepted(ctx, &envelope.Data)
 		},
 	},
 )
 
 var _ = pubsub.NewSubscription(
-	quote.QuoteRejectedTopic, "handle-quote-rejected",
-	pubsub.SubscriptionConfig[*eventscommon.EventEnvelope[eventscommon.BookingEvent]]{
-		Handler: func(ctx context.Context, envelope *eventscommon.EventEnvelope[eventscommon.BookingEvent]) error {
-			domainEvent := convertToDomainEvent(&envelope.Data)
-
-			ctx = events.WithEventMetadata(ctx, &events.EventMetadata{
+	topics_quote.QuoteRejectedTopic, "handle-quote-rejected",
+	pubsub.SubscriptionConfig[eventscommon.EventEnvelope[eventscommon.QuoteEvent]]{ // Remove pointer
+		Handler: func(ctx context.Context, envelope eventscommon.EventEnvelope[eventscommon.QuoteEvent]) error { // Remove pointer
+			ctx = eventscommon.WithEventMetadata(ctx, &binternal.EventMetadata{
 				CorrelationID: envelope.CorrelationID,
 				CausationID:   envelope.EventID,
 				UserID:        envelope.Data.UserID,
@@ -187,18 +194,18 @@ var _ = pubsub.NewSubscription(
 			if err != nil {
 				return err
 			}
-			return s.OnQuoteRejected(ctx, domainEvent)
+			return s.OnQuoteRejected(ctx, &envelope.Data)
 		},
 	},
 )
 
 var _ = pubsub.NewSubscription(
-	payment.PaymentConfirmedTopic, "handle-payment-confirmed",
-	pubsub.SubscriptionConfig[*eventscommon.EventEnvelope[eventscommon.BookingEvent]]{
-		Handler: func(ctx context.Context, envelope *eventscommon.EventEnvelope[eventscommon.BookingEvent]) error {
+	topics_payment.PaymentConfirmedTopic, "handle-payment-confirmed",
+	pubsub.SubscriptionConfig[*eventscommon.EventEnvelope[domain.BookingEvent]]{
+		Handler: func(ctx context.Context, envelope *eventscommon.EventEnvelope[domain.BookingEvent]) error {
 			domainEvent := convertToDomainEvent(&envelope.Data)
 
-			ctx = events.WithEventMetadata(ctx, &events.EventMetadata{
+			ctx = eventscommon.WithEventMetadata(ctx, &binternal.EventMetadata{
 				CorrelationID: envelope.CorrelationID,
 				CausationID:   envelope.EventID,
 				UserID:        envelope.Data.UserID,
@@ -214,12 +221,12 @@ var _ = pubsub.NewSubscription(
 )
 
 var _ = pubsub.NewSubscription(
-	payment.PaymentFailedTopic, "handle-payment-failed",
-	pubsub.SubscriptionConfig[*eventscommon.EventEnvelope[eventscommon.BookingEvent]]{
-		Handler: func(ctx context.Context, envelope *eventscommon.EventEnvelope[eventscommon.BookingEvent]) error {
+	topics_payment.PaymentFailedTopic, "handle-payment-failed",
+	pubsub.SubscriptionConfig[*eventscommon.EventEnvelope[domain.BookingEvent]]{
+		Handler: func(ctx context.Context, envelope *eventscommon.EventEnvelope[domain.BookingEvent]) error {
 			domainEvent := convertToDomainEvent(&envelope.Data)
 
-			ctx = events.WithEventMetadata(ctx, &events.EventMetadata{
+			ctx = eventscommon.WithEventMetadata(ctx, &binternal.EventMetadata{
 				CorrelationID: envelope.CorrelationID,
 				CausationID:   envelope.EventID,
 				UserID:        envelope.Data.UserID,
@@ -235,12 +242,11 @@ var _ = pubsub.NewSubscription(
 )
 
 var _ = pubsub.NewSubscription(
-	quote.QuoteProposedTopic, "handle-quote-proposed",
-	pubsub.SubscriptionConfig[*eventscommon.EventEnvelope[eventscommon.BookingEvent]]{
-		Handler: func(ctx context.Context, envelope *eventscommon.EventEnvelope[eventscommon.BookingEvent]) error {
-			domainEvent := convertToDomainEvent(&envelope.Data)
+	topics_quote.QuoteProposedTopic, "handle-quote-proposed",
+	pubsub.SubscriptionConfig[eventscommon.EventEnvelope[eventscommon.QuoteEvent]]{
+		Handler: func(ctx context.Context, envelope eventscommon.EventEnvelope[eventscommon.QuoteEvent]) error {
 
-			ctx = events.WithEventMetadata(ctx, &events.EventMetadata{
+			ctx = eventscommon.WithEventMetadata(ctx, &binternal.EventMetadata{
 				CorrelationID: envelope.CorrelationID,
 				CausationID:   envelope.EventID,
 				UserID:        envelope.Data.UserID,
@@ -250,13 +256,14 @@ var _ = pubsub.NewSubscription(
 			if err != nil {
 				return err
 			}
-			return s.OnQuoteProposed(ctx, domainEvent)
+			result := s.OnQuoteProposed(ctx, &envelope.Data)
+			return result
 		},
 	},
 )
 
 // Helper function to convert common event to domain event
-func convertToDomainEvent(commonEvent *eventscommon.BookingEvent) *domain.BookingEvent {
+func convertToDomainEvent(commonEvent *domain.BookingEvent) *domain.BookingEvent {
 	return &domain.BookingEvent{
 		BookingID:      commonEvent.BookingID,
 		Status:         domain.BookingStatus(commonEvent.Status),
@@ -268,29 +275,68 @@ func convertToDomainEvent(commonEvent *eventscommon.BookingEvent) *domain.Bookin
 	}
 }
 
-func (s *Service) OnQuoteProposed(ctx context.Context, event *domain.BookingEvent) error {
-	current, err := s.bookingsHandler.GetRepository().GetByID(ctx, event.BookingID)
+func (s *Service) OnQuoteProposed(ctx context.Context, quoteEvent *eventscommon.QuoteEvent) error {
+	current, err := s.bookingsHandler.GetRepository().GetByID(ctx, quoteEvent.BookingID)
 	if err != nil {
+		log.Printf("[ERROR] Failed to get booking %s in OnQuoteProposed: %v",
+			quoteEvent.BookingID, err)
 		return err
 	}
-	return s.bookingsHandler.UpdateBookingStatusInternal(ctx, event.BookingID, domain.BookingQuoteProposed, event.UserID, nil, current)
+
+	err = s.bookingsHandler.UpdateBookingStatusInternal(
+		ctx,
+		quoteEvent.BookingID,
+		domain.BookingQuoteProposed,
+		quoteEvent.UserID,
+		nil,
+		current,
+	)
+
+	if err != nil {
+		log.Printf("[ERROR] Failed to update booking %s to quote_proposed: %v",
+			quoteEvent.BookingID, err)
+		return err
+	}
+	return nil
 }
 
-func (s *Service) OnQuoteAccepted(ctx context.Context, event *domain.BookingEvent) error {
-	current, err := s.bookingsHandler.GetRepository().GetByID(ctx, event.BookingID)
+func (s *Service) OnQuoteAccepted(ctx context.Context, quoteEvent *eventscommon.QuoteEvent) error {
+	current, err := s.bookingsHandler.GetRepository().GetByID(ctx, quoteEvent.BookingID)
 	if err != nil {
 		return err
 	}
-	return s.bookingsHandler.UpdateBookingStatusInternal(ctx, event.BookingID, domain.BookingQuoteAccepted, event.UserID, nil, current)
+	return s.bookingsHandler.UpdateBookingStatusInternal(
+		ctx,
+		quoteEvent.BookingID,
+		domain.BookingQuoteAccepted,
+		quoteEvent.UserID,
+		nil,
+		current,
+	)
 }
 
-func (s *Service) OnQuoteRejected(ctx context.Context, event *domain.BookingEvent) error {
-	current, err := s.bookingsHandler.GetRepository().GetByID(ctx, event.BookingID)
+func (s *Service) OnQuoteRejected(ctx context.Context, quoteEvent *eventscommon.QuoteEvent) error {
+	current, err := s.bookingsHandler.GetRepository().GetByID(ctx, quoteEvent.BookingID)
 	if err != nil {
 		return err
 	}
-	// If quote is rejected, transition back to Assigned so artisan can propose a new quote or customer can re-offer
-	return s.bookingsHandler.UpdateBookingStatusInternal(ctx, event.BookingID, domain.BookingAssigned, event.UserID, event.Reason, current)
+
+	// Build reason from rejection code
+	var reason *string
+	if quoteEvent.RejectionReasonCode != nil {
+		reasonText := fmt.Sprintf("quote_rejected: %s", *quoteEvent.RejectionReasonCode)
+		reason = &reasonText
+	}
+
+	// Transition back to Assigned so artisan can propose a new quote
+	return s.bookingsHandler.UpdateBookingStatusInternal(
+		ctx,
+		quoteEvent.BookingID,
+		domain.BookingAssigned,
+		quoteEvent.UserID,
+		reason,
+		current,
+	)
 }
 
 func (s *Service) OnPaymentConfirmed(ctx context.Context, event *domain.BookingEvent) error {

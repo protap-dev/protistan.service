@@ -34,14 +34,11 @@ type RematchEvent struct {
 // By defining this in the domain, we decouple the application core from the pub/sub implementation
 type EventPublisher interface {
 	PublishStatusEvent(ctx context.Context, event *BookingEvent)
-	PublishCreatedEvent(ctx context.Context, event *BookingEvent)
 	PublishCancelledEvent(ctx context.Context, event *BookingEvent)
 
 	// Offer-related events
 	PublishOfferCreatedEvent(ctx context.Context, event *BookingEvent)
 	PublishAssignedEvent(ctx context.Context, event *BookingEvent)
-	PublishOfferRejectedEvent(ctx context.Context, event *BookingEvent)
-
 	// Rematch events
 	PublishRematchRequestedEvent(ctx context.Context, event *RematchEvent)
 }

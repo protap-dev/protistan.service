@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"encore.app/booking/domain"
+	corerepo "encore.app/core/repository"
 	"gorm.io/gorm"
 )
 
@@ -16,7 +17,7 @@ func insertEventInOutbox[T any](db *gorm.DB, ctx context.Context, event T, topic
 		return err
 	}
 
-	dbModel := &OutboxEvent{
+	dbModel := &corerepo.OutboxEvent{
 		Topic:       topic,
 		Data:        jsonData,
 		InsertedAt:  time.Now(),
@@ -28,13 +29,13 @@ func insertEventInOutbox[T any](db *gorm.DB, ctx context.Context, event T, topic
 // CreateEventInOutbox writes a booking event directly to the outbox table within a transaction.
 // This ensures events are published atomically with database changes.
 func (r *bookingRepository) CreateEventInOutbox(ctx context.Context, event *domain.BookingEvent) error {
-	return insertEventInOutbox(r.db, ctx, event, getTopicForEvent(event))
+	return insertEventInOutbox(r.coreDB, ctx, event, getTopicForEvent(event))
 }
 
 // CreateRematchEventInOutbox writes a rematch event directly to the outbox table within a transaction.
 // This ensures rematch events are published atomically.
 func (r *bookingRepository) CreateRematchEventInOutbox(ctx context.Context, event *domain.RematchEvent) error {
-	return insertEventInOutbox(r.db, ctx, event, "booking-rematch")
+	return insertEventInOutbox(r.coreDB, ctx, event, "booking-rematch")
 }
 
 // Helper functions for outbox functionality
@@ -64,6 +65,10 @@ func getTopicForEvent(event *domain.BookingEvent) string {
 	case domain.BookingEnroute:
 		return "booking.status"
 	case domain.BookingInProgress:
+		return "booking.status"
+	case domain.BookingQuoteAccepted:
+		return "booking.status"
+	case domain.BookingQuoteRejected:
 		return "booking.status"
 	case domain.BookingCompleted:
 		return "booking.status"

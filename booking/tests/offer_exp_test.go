@@ -42,7 +42,7 @@ func setupOfferExpiryTest(t *testing.T) (*handlers.BookingsHandler, *gorm.DB, fu
 		publishedEvents: make([]*domain.BookingEvent, 0),
 	}
 
-	repo := repository.NewBookingRepository(gormDB)
+	repo := repository.NewBookingRepository(gormDB, gormDB)
 	handler := handlers.NewBookingsHandler(repo, validator, offerValidator, logger, cacheImpl, coreSvc, authHelper, mockPublisher)
 
 	cleanup := func() {

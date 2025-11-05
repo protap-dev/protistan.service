@@ -3,6 +3,7 @@ package relay
 import "time"
 
 // Config holds configuration for the outbox relay
+// This is shared configuration that all services can use
 type Config struct {
 	PollingInterval time.Duration // How often to poll for events
 	BatchSize       int           // Number of events to process per batch

@@ -17,20 +17,19 @@ type EventEnvelope[T any] struct {
 	Data          T         `json:"data"`
 }
 
-// BookingEvent represents a booking state change
-// This is shared across services so they all speak the same language
-type BookingEvent struct {
-	BookingID      string            `json:"booking_id"`
-	QuoteID        string            `json:"quote_id,omitempty"`
-	PaymentID      string            `json:"payment_id,omitempty"`
-	Amount         float64           `json:"amount,omitempty"`
-	Status         string            `json:"status"`
-	PreviousStatus string            `json:"previous_status"`
-	Timestamp      time.Time         `json:"timestamp"`
-	UserID         string            `json:"user_id"`
-	ArtisanID      *string           `json:"artisan_id,omitempty"`
-	Reason         *string           `json:"reason,omitempty"`
-	Metadata       map[string]string `json:"metadata,omitempty"`
+type QuoteEvent struct {
+	QuoteID             string    `json:"quote_id"`
+	BookingID           string    `json:"booking_id"`
+	Version             int       `json:"version"`
+	State               string    `json:"state"`
+	PreviousState       string    `json:"previous_state"`
+	AmountCents         int64     `json:"amount_cents"`
+	Currency            string    `json:"currency"`
+	ProposedBy          string    `json:"proposed_by"`
+	DecisionBy          *string   `json:"decision_by,omitempty"`
+	Timestamp           time.Time `json:"timestamp"`
+	UserID              string    `json:"user_id"`
+	RejectionReasonCode *string   `json:"rejection_reason_code,omitempty"`
 }
 
 // Helper to generate IDs

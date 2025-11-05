@@ -5,14 +5,9 @@ import (
 	"log"
 	"time"
 
-	"encore.app/booking/repository"
+	"encore.app/core/repository"
 	"gorm.io/gorm"
 )
-
-// Cleanup handles maintenance tasks like removing old processed events
-type Cleanup interface {
-	CleanupOldEvents(ctx context.Context, db *gorm.DB, retentionPeriod time.Duration) error
-}
 
 // DefaultCleanup implements the Cleanup interface
 type DefaultCleanup struct{}

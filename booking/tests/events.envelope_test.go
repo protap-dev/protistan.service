@@ -10,6 +10,7 @@ import (
 	"encore.app/booking/domain"
 	"encore.app/booking/events"
 	"encore.app/booking/internal"
+	eventscommon "encore.app/core/events"
 	"encore.dev/et"
 	"encore.dev/pubsub"
 	"github.com/google/uuid"
@@ -33,7 +34,7 @@ func TestEventEnvelopeCreation(t *testing.T) {
 		RequestID:     requestID,
 	}
 
-	ctx := internal.WithEventMetadata(context.Background(), metadata)
+	ctx := eventscommon.WithEventMetadata(context.Background(), metadata)
 
 	// Create test event
 	event := domain.BookingEvent{
@@ -128,15 +129,15 @@ func TestEventMetadataExtraction(t *testing.T) {
 		RequestID:     "test-request",
 	}
 
-	ctx := internal.WithEventMetadata(context.Background(), metadata)
+	ctx := eventscommon.WithEventMetadata(context.Background(), metadata)
 
-	extracted, ok := internal.ExtractEventMetadata(ctx)
+	extracted, ok := eventscommon.ExtractEventMetadata(ctx)
 	require.True(t, ok, "should extract metadata from context")
 	assert.Equal(t, metadata, extracted)
 
 	// Test without metadata in context
 	ctx2 := context.Background()
-	extracted2, ok2 := internal.ExtractEventMetadata(ctx2)
+	extracted2, ok2 := eventscommon.ExtractEventMetadata(ctx2)
 	assert.False(t, ok2, "should return false when no metadata in context")
 	assert.Nil(t, extracted2)
 
@@ -168,7 +169,7 @@ func TestEventCorrelationAcrossSagaSteps(t *testing.T) {
 		CausationID:   createEnvelope.EventID,       // CAUSED BY create event
 		UserID:        "user-456",
 	}
-	ctx2 := internal.WithEventMetadata(ctx, metadata2)
+	ctx2 := eventscommon.WithEventMetadata(ctx, metadata2)
 
 	offerEvent := domain.BookingEvent{
 		BookingID: "booking-123",
@@ -188,7 +189,7 @@ func TestEventCorrelationAcrossSagaSteps(t *testing.T) {
 		CausationID:   offerEnvelope.EventID,       // CAUSED BY offer event
 		UserID:        "user-456",
 	}
-	ctx3 := internal.WithEventMetadata(ctx, metadata3)
+	ctx3 := eventscommon.WithEventMetadata(ctx, metadata3)
 
 	artisanID := "artisan-789"
 	assignEvent := domain.BookingEvent{
@@ -244,7 +245,7 @@ func TestEventEnvelopePublishingThroughOutbox(t *testing.T) {
 		UserID:        "user-456",
 		RequestID:     "req-789",
 	}
-	ctx = internal.WithEventMetadata(ctx, metadata)
+	ctx = eventscommon.WithEventMetadata(ctx, metadata)
 
 	// Publish event through actual outbox
 	tx, err := testDB.Begin(ctx)
@@ -262,7 +263,7 @@ func TestEventEnvelopePublishingThroughOutbox(t *testing.T) {
 	envelope := events.CreateEventEnvelope(ctx, "booking.created", event)
 
 	// Publish through outbox (event wrapped in envelope)
-	topicRef := pubsub.TopicRef[pubsub.Publisher[*events.EventEnvelope[domain.BookingEvent]]](events.StatusTopic)
+	topicRef := pubsub.TopicRef[pubsub.Publisher[*events.EventEnvelope[domain.BookingEvent]]](events.RematchTopic)
 	outboxRef := outbox.Bind(topicRef, outbox.TxPersister(tx))
 
 	msgID, err := outboxRef.Publish(ctx, envelope)
@@ -300,7 +301,7 @@ func TestEventEnvelopeSerialization(t *testing.T) {
 		RequestID:     "test-request",
 	}
 
-	ctx := internal.WithEventMetadata(context.Background(), metadata)
+	ctx := eventscommon.WithEventMetadata(context.Background(), metadata)
 
 	event := domain.BookingEvent{
 		BookingID: "booking-123",
@@ -417,7 +418,7 @@ func TestMultipleEventsWithSameCorrelation(t *testing.T) {
 		RequestID:     "req-456",
 	}
 
-	ctx := internal.WithEventMetadata(context.Background(), metadata)
+	ctx := eventscommon.WithEventMetadata(context.Background(), metadata)
 
 	// Create first event
 	event1 := domain.BookingEvent{
@@ -435,7 +436,7 @@ func TestMultipleEventsWithSameCorrelation(t *testing.T) {
 		UserID:        "user-123",
 		RequestID:     "req-456",
 	}
-	ctx2 := internal.WithEventMetadata(ctx, metadata2)
+	ctx2 := eventscommon.WithEventMetadata(ctx, metadata2)
 
 	// Create second event (in response to first)
 	event2 := domain.BookingEvent{

@@ -7,12 +7,15 @@ import (
 
 // Metrics tracks relay performance and health
 type Metrics struct {
-	EventsProcessed    int64
-	EventsPublished    int64
-	EventsFailed       int64
-	ProcessingErrors   int64
-	LastProcessingTime time.Time
-	mu                 sync.RWMutex
+	EventsProcessed     int64
+	EventsPublished     int64
+	EventsFailed        int64
+	EventsPermanentFail int64
+	ProcessingErrors    int64
+	RetryScheduled      int64
+	LastProcessingTime  time.Time
+	AverageLatency      time.Duration
+	mu                  sync.RWMutex
 }
 
 // MetricsSnapshot is a thread-safe snapshot of relay metrics for external access
@@ -29,6 +32,18 @@ func NewMetrics() *Metrics {
 	return &Metrics{
 		LastProcessingTime: time.Now(),
 	}
+}
+
+func (m *Metrics) RecordRetryScheduled() {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.RetryScheduled++
+}
+
+func (m *Metrics) RecordPermanentFailure() {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.EventsPermanentFail++
 }
 
 // RecordProcessingTime records the time taken for a processing cycle
