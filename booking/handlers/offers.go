@@ -227,10 +227,15 @@ func (h *BookingsHandler) AcceptOffer(ctx context.Context, offerID string, req *
 			Timestamp:      time.Now(),
 			UserID:         userCtx.ID,
 			ArtisanID:      &offer.ArtisanID,
+			Metadata: map[string]string{
+				"customer_id": currentBooking.CustomerID,
+			},
 		}
 
-		if err := txRepo.CreateEventInOutbox(ctx, assignedEvent); err != nil {
-			return err
+		if err := h.repo.CreateEventInOutbox(ctx, assignedEvent); err != nil {
+			h.logger.Error(ctx, "failed to publish booking assigned event", err, map[string]interface{}{
+				"booking_id": booking.ID,
+			})
 		}
 
 		// Cancel other pending offers for this booking
