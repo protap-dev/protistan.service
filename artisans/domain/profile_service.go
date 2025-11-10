@@ -94,7 +94,7 @@ func (s *ProfileService) CreateProfile(ctx context.Context, userCtx *internal.Us
 		}
 
 		// 4. Check if profile exists within transaction
-		existing, err := txRepo.GetByUserID(ctx, userCtx.ID)
+		existing, err := txRepo.GetByID(ctx, userCtx.ID)
 		if err != nil && !errors.Is(err, ErrNotFound) {
 			return err // Transaction will rollback
 		}
@@ -206,7 +206,7 @@ func (s *ProfileService) UpdateProfile(ctx context.Context, userCtx *internal.Us
 		}
 
 		// 4. Get existing profile within transaction
-		existing, err := txRepo.GetByUserID(ctx, userCtx.ID)
+		existing, err := txRepo.GetByID(ctx, userCtx.ID)
 		if err != nil {
 			if errors.Is(err, ErrNotFound) {
 				return internal.ErrArtisanNotFound
@@ -348,7 +348,7 @@ func (s *ProfileService) GetProfile(ctx context.Context, userCtx *internal.UserC
 		}
 
 		// 2. Get artisan profile within transaction for consistency
-		artisan, err := txRepo.GetByUserID(ctx, userCtx.ID)
+		artisan, err := txRepo.GetByID(ctx, userCtx.ID)
 		if err != nil {
 			if errors.Is(err, ErrNotFound) {
 				return internal.ErrArtisanNotFound
@@ -426,44 +426,6 @@ func (s *ProfileService) validateBasicProfileComplete(completeProfile *user.Comp
 	}
 
 	return nil
-}
-
-// GetArtisanIDByUserID retrieves artisan ID for a given user ID with caching
-func (s *ProfileService) GetArtisanIDByUserID(ctx context.Context, userID string) (string, error) {
-	// 1. Check cache first (5-minute TTL)
-	cacheKey := fmt.Sprintf("user_artisan_mapping:%s", userID)
-	if cached, found := s.coreSvc.Cache().Get(ctx, cacheKey); found {
-		if artisanID, ok := cached.(string); ok {
-			s.logger.LogUserAction(ctx, "artisan_id_cache_hit", userID)
-			return artisanID, nil
-		}
-	}
-
-	// 2. Cache miss - fetch from database
-	var artisanID string
-	err := s.repo.WithReadTransaction(ctx, func(txRepo ArtisanRepository) error {
-		artisan, err := txRepo.GetByUserID(ctx, userID)
-		if err != nil {
-			return err
-		}
-		artisanID = artisan.ID
-		return nil
-	})
-
-	if err != nil {
-		if errors.Is(err, ErrNotFound) {
-			// Cache negative result too (prevent repeated lookups for non-artisans)
-			s.coreSvc.Cache().Set(ctx, cacheKey, "", 5*time.Minute)
-			return "", ErrNotFound
-		}
-		return "", err
-	}
-
-	// 3. Cache the result
-	s.coreSvc.Cache().Set(ctx, cacheKey, artisanID, 5*time.Minute)
-	s.logger.LogUserAction(ctx, "artisan_id_cached", userID)
-
-	return artisanID, nil
 }
 
 func (s *ProfileService) createNew(ctx context.Context, input *CreateProfileInput, userID string) (*ArtisanProfile, error) {

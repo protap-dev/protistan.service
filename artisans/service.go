@@ -86,10 +86,3 @@ func (s *Service) GetArtisanRates(ctx context.Context, id string) (*handlers.Get
 func (s *Service) UpdateRates(ctx context.Context, req *handlers.UpdateArtisanRatesRequest) (*handlers.UpdateArtisanRatesResponse, error) {
 	return s.ratesHandler.UpdateRates(ctx, req)
 }
-
-// GetArtisanIDByUserID retrieves artisan ID for a given user ID
-//
-//encore:api private method=GET path=/v0/artisans/profileby-user/:user_id
-func (s *Service) GetArtisanIDByUserID(ctx context.Context, user_id string) (*handlers.GetArtisanIDByUserIDResponse, error) {
-	return s.profileHandler.GetArtisanIDByUserID(ctx, user_id)
-}

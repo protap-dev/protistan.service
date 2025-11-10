@@ -99,21 +99,7 @@ func (r *artisanRepository) Create(ctx context.Context, artisan *domain.ArtisanP
 func (r *artisanRepository) GetByID(ctx context.Context, id string) (*domain.ArtisanProfile, error) {
 	var dbModel ArtisanDBModel
 
-	if err := r.db.WithContext(ctx).Where("id = ?", id).First(&dbModel).Error; err != nil {
-		if errors.Is(err, gorm.ErrRecordNotFound) {
-			return nil, domain.ErrNotFound
-		}
-		return nil, err
-	}
-
-	return toDomainModel(&dbModel), nil
-}
-
-// GetByUserID retrieves an artisan by user ID
-func (r *artisanRepository) GetByUserID(ctx context.Context, userID string) (*domain.ArtisanProfile, error) {
-	var dbModel ArtisanDBModel
-
-	if err := r.db.WithContext(ctx).Where("user_id = ?", userID).First(&dbModel).Error; err != nil {
+	if err := r.db.WithContext(ctx).Where("user_id = ?", id).First(&dbModel).Error; err != nil {
 		if errors.Is(err, gorm.ErrRecordNotFound) {
 			return nil, domain.ErrNotFound
 		}
