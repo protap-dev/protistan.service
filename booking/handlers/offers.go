@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"time"
 
-	"encore.app/artisans"
 	"encore.app/booking/domain"
 	binternal "encore.app/booking/internal"
 	"encore.dev/beta/errs"
@@ -165,17 +164,8 @@ func (h *BookingsHandler) AcceptOffer(ctx context.Context, offerID string, req *
 		return nil, binternal.ErrPermissionDenied
 	}
 
-	artisanResp, err := artisans.GetArtisanIDByUserID(ctx, userCtx.ID)
-	if err != nil {
-		return nil, fmt.Errorf("failed to get artisan profile: %w", err)
-	}
-
-	if !artisanResp.Found {
-		return nil, fmt.Errorf("user is not an artisan")
-	}
-
 	// Now check if this artisan profile matches the offer
-	if offer.ArtisanID != artisanResp.ArtisanID {
+	if offer.ArtisanID != userCtx.ID {
 		return nil, binternal.ErrPermissionDenied
 	}
 

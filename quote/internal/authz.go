@@ -4,24 +4,13 @@ import (
 	"context"
 	"slices"
 
-	"encore.app/artisans"
 	"encore.dev/beta/errs"
 )
 
 // AuthorizeProposeQuote checks if an artisan is permitted to propose a quote for a booking.
 func AuthorizeProposeQuote(ctx context.Context, userID string, bookingArtisanID *string, bookingStatus string) error {
-	// 1. Verify user is an artisan
-	artisanResp, err := artisans.GetArtisanIDByUserID(ctx, userID)
-	if err != nil {
-		return errs.B().Code(errs.Internal).Msg("failed to get artisan profile").Err()
-	}
-	if !artisanResp.Found {
-		return errs.B().Code(errs.PermissionDenied).Msg("only artisans can propose quotes").Err()
-	}
-	artisanID := artisanResp.ArtisanID
-
-	// 2. Verify artisan is assigned to this booking
-	if bookingArtisanID == nil || *bookingArtisanID != artisanID {
+	// 1. Verify user is the assigned artisan
+	if bookingArtisanID == nil || *bookingArtisanID != userID {
 		return errs.B().Code(errs.PermissionDenied).Msg("not assigned to this booking").Err()
 	}
 
@@ -47,12 +36,6 @@ func AuthorizeListQuotes(ctx context.Context, userID string, bookingCustomerID s
 
 	// Assigned artisan can view quotes
 	if bookingArtisanID != nil && *bookingArtisanID == userID {
-		return nil
-	}
-
-	// Check if user is an artisan and matches the artisan ID
-	artisanResp, err := artisans.GetArtisanIDByUserID(ctx, userID)
-	if err == nil && artisanResp.Found && bookingArtisanID != nil && *bookingArtisanID == artisanResp.ArtisanID {
 		return nil
 	}
 

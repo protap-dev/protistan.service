@@ -83,7 +83,7 @@ func (s *RatesService) GetArtisanRates(ctx context.Context, artisanID string) (*
 // UpdateArtisanRates updates rates for the authenticated artisan
 func (s *RatesService) UpdateArtisanRates(ctx context.Context, userCtx *internal.UserContext, input *UpdateArtisanRatesInput) (*ArtisanRatesResponse, error) {
 	// Verify the user is an artisan
-	artisan, err := s.artisanRepo.GetByUserID(ctx, userCtx.ID)
+	artisan, err := s.artisanRepo.GetByID(ctx, userCtx.ID)
 	if err != nil {
 		s.logger.LogError(ctx, "update_rates_verify_artisan", err)
 		return nil, err
