@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"slices"
+	"strings"
 	"time"
 
 	"encore.app/booking/domain"
@@ -262,8 +263,9 @@ func (h *BookingsHandler) ListBookings(ctx context.Context, params *ListBookings
 	}
 
 	if params.Status != "" {
-		status := domain.BookingStatus(params.Status)
-		validStatus := slices.Contains([]domain.BookingStatus{
+		// Split comma-separated statuses
+		statusStrings := strings.Split(params.Status, ",")
+		validStatuses := []domain.BookingStatus{
 			domain.BookingRequested,
 			domain.BookingOfferPending,
 			domain.BookingOfferRejected,
@@ -271,6 +273,7 @@ func (h *BookingsHandler) ListBookings(ctx context.Context, params *ListBookings
 			domain.BookingPendingQuote,
 			domain.BookingQuoteProposed,
 			domain.BookingQuoteAccepted,
+			domain.BookingQuoteRejected,
 			domain.BookingPaymentPending,
 			domain.BookingConfirmed,
 			domain.BookingEnroute,
@@ -278,14 +281,22 @@ func (h *BookingsHandler) ListBookings(ctx context.Context, params *ListBookings
 			domain.BookingCompleted,
 			domain.BookingCancelled,
 			domain.BookingClosed,
-		}, status)
-		if !validStatus {
-			return nil, binternal.ErrValidationFailed
 		}
 
+		// Validate each status
+		requestedStatuses := make([]domain.BookingStatus, 0, len(statusStrings))
+		for _, s := range statusStrings {
+			status := domain.BookingStatus(strings.TrimSpace(s))
+			if !slices.Contains(validStatuses, status) {
+				return nil, binternal.ErrValidationFailed
+			}
+			requestedStatuses = append(requestedStatuses, status)
+		}
+
+		// Filter bookings by any of the requested statuses
 		filtered := make([]*domain.Booking, 0)
 		for _, b := range bookings {
-			if b.Status == status {
+			if slices.Contains(requestedStatuses, b.Status) {
 				filtered = append(filtered, b)
 			}
 		}

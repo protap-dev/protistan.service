@@ -32,9 +32,9 @@ type CancelBookingRequest struct {
 }
 
 type ListBookingsParams struct {
-	Status string `json:"status,omitempty"`
-	Limit  int    `json:"limit,omitempty"`
-	Offset int    `json:"offset,omitempty"`
+	Status string `query:"status,omitempty"`
+	Limit  int    `query:"limit,omitempty"`
+	Offset int    `query:"offset,omitempty"`
 }
 
 type BookingResponse struct {
