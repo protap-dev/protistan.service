@@ -38,6 +38,7 @@ type RatesRepository interface {
 	Delete(ctx context.Context, id string) error
 	GetServiceByID(ctx context.Context, serviceID string) (*Service, error)
 	GetCategoryByID(ctx context.Context, categoryID string) (*ServiceCategory, error)
+	GetAllCategories(ctx context.Context) ([]ServiceCategory, error)
 
 	// Add transaction support for atomic operations
 	WithTransaction(ctx context.Context, fn func(RatesRepository) error) error

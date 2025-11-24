@@ -70,12 +70,14 @@ func (h *SearchHandler) Search(ctx context.Context, req *SearchArtisansRequest) 
 // validateSearchRequest validates search parameters
 func (h *SearchHandler) validateSearchRequest(req *SearchArtisansRequest) error {
 	// At least one search criteria must be provided
-	if req.Query == nil && req.CategoryIDs == nil && req.Location == nil {
+	if (req.Query == nil || strings.TrimSpace(*req.Query) == "") &&
+		(req.CategoryIDs == nil || len(*req.CategoryIDs) == 0) &&
+		(req.Location == nil || strings.TrimSpace(*req.Location) == "") {
 		return internal.ErrInvalidSearchQuery
 	}
 
-	// Validate query if provided
-	if req.Query != nil && len(strings.TrimSpace(*req.Query)) < 2 {
+	// Validate query if provided, ensuring it's not empty and meets length requirements
+	if req.Query != nil && strings.TrimSpace(*req.Query) != "" && len(strings.TrimSpace(*req.Query)) < 2 {
 		return internal.ErrInvalidSearchQuery
 	}
 
@@ -115,7 +117,7 @@ func (h *SearchHandler) convertSearchResults(results []domain.SearchResult) []Ar
 
 	for i, result := range results {
 		responseResults[i] = ArtisanSearchResult{
-			Artisan:    result.Artisan,
+			Artisan: result.Artisan,
 			User: domain.UserData{
 				ID:       result.User.ID,
 				Email:    result.User.Email,
