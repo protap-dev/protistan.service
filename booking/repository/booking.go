@@ -88,18 +88,17 @@ func (r *bookingRepository) Update(ctx context.Context, booking *domain.Booking)
 	result := r.db.WithContext(ctx).Model(&bookingDBModel{}).
 		Where("id = ? AND version = ?", dbModel.ID, dbModel.Version).
 		Updates(map[string]any{
-			"artisan_id":              dbModel.ArtisanID,
-			"status":                  dbModel.Status,
-			"title":                   dbModel.Title,
-			"description":             dbModel.Description,
-			"priority":                dbModel.Priority,
-			"scheduled_at":            dbModel.ScheduledAt,
-			"estimated_duration_mins": dbModel.EstimatedDurationMins,
-			"metadata":                dbModel.Metadata,
-			"is_specific_artisan":     dbModel.IsSpecificArtisan,
-			"offers_count":            dbModel.OffersCount,
-			"updated_at":              time.Now(),
-			"version":                 gorm.Expr("version + 1"),
+			"artisan_id":          dbModel.ArtisanID,
+			"status":              dbModel.Status,
+			"title":               dbModel.Title,
+			"description":         dbModel.Description,
+			"priority":            dbModel.Priority,
+			"scheduled_at":        dbModel.ScheduledAt,
+			"metadata":            dbModel.Metadata,
+			"is_specific_artisan": dbModel.IsSpecificArtisan,
+			"offers_count":        dbModel.OffersCount,
+			"updated_at":          time.Now(),
+			"version":             gorm.Expr("version + 1"),
 		})
 
 	if result.Error != nil {

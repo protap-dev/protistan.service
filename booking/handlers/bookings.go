@@ -66,56 +66,72 @@ func (h *BookingsHandler) CreateBooking(ctx context.Context, req *CreateBookingR
 		return nil, err
 	}
 
-	// Check if customer is requesting a specific artisan
-	isSpecificArtisan := req.SpecificArtisanID != nil && *req.SpecificArtisanID != ""
-
-	booking := &domain.Booking{
-		CustomerID:            userCtx.ID,
-		ServiceCategoryID:     req.ServiceCategoryID,
-		Title:                 req.Title,
-		Description:           req.Description,
-		CustomerAddressID:     req.CustomerAddressID,
-		Status:                domain.BookingRequested,
-		Priority:              req.Priority,
-		ScheduledAt:           req.ScheduledAt,
-		EstimatedDurationMins: req.EstimatedDurationMins,
-		Metadata:              req.Metadata,
-		IsSpecificArtisan:     isSpecificArtisan,
-		CreatedAt:             time.Now(),
-		UpdatedAt:             time.Now(),
-		Version:               1,
+	var artisanID *string
+	isSpecificArtisan := false
+	if req.SpecificArtisanID != nil && *req.SpecificArtisanID != "" {
+		isSpecificArtisan = true
+		artisanID = req.SpecificArtisanID
 	}
 
-	if err := binternal.ValidateCustomerRole(ctx, userCtx.ID, h.logger); err != nil {
-		return nil, err
+	// Construct the domain request for validation
+	domainReq := &domain.CreateBookingRequest{
+		ServiceCategoryID: req.ServiceCategoryID,
+		ServiceID:         req.ServiceID,
+		CustomerAddressID: req.CustomerAddressID,
+		Description:       req.Description,
+		MediaURLs:         req.MediaURLs,
+		ScheduledAt:       req.ScheduledAt,
+		IsFlexible:        req.IsFlexible,
 	}
 
-	if err := h.validator.ValidateCreateRequest(&domain.CreateBookingRequest{
-		ServiceCategoryID:     req.ServiceCategoryID,
-		Title:                 req.Title,
-		Description:           req.Description,
-		CustomerAddressID:     req.CustomerAddressID,
-		Priority:              req.Priority,
-		ScheduledAt:           req.ScheduledAt,
-		EstimatedDurationMins: req.EstimatedDurationMins,
-		Metadata:              req.Metadata,
-	}); err != nil {
+	// Validate input first
+	if err := h.validator.ValidateCreateRequest(domainReq); err != nil {
 		h.logger.Error(ctx, "validation failed", err, map[string]interface{}{
 			"user_id": userCtx.ID,
 		})
 		return nil, binternal.ErrInvalidInput
 	}
 
-	domainReq := &domain.CreateBookingRequest{
-		ServiceCategoryID:     req.ServiceCategoryID,
-		Title:                 req.Title,
-		Description:           req.Description,
-		CustomerAddressID:     req.CustomerAddressID,
-		Priority:              req.Priority,
-		ScheduledAt:           req.ScheduledAt,
-		EstimatedDurationMins: req.EstimatedDurationMins,
-		Metadata:              req.Metadata,
+	// Generate a title automatically - TODO: Make this event based if possible, i.e subscribe to receive name from core db
+	var autoTitle string
+	serviceName := req.Metadata["service_name"]
+	if serviceName != "" {
+		autoTitle = fmt.Sprintf("%s.", serviceName)
+	} else {
+		autoTitle = fmt.Sprintf("Service Request: %s", time.Now().Format("Jan 02"))
 	}
+
+	// Default priority based on ScheduledAt
+	defaultPriority := "normal"
+	if req.ScheduledAt != nil && time.Until(*req.ScheduledAt) < 24*time.Hour {
+		defaultPriority = "high"
+	}
+
+	booking := &domain.Booking{
+		CustomerID:        userCtx.ID,
+		ArtisanID:         artisanID,
+		ServiceCategoryID: req.ServiceCategoryID,
+		ServiceID:         req.ServiceID,
+		Title:             autoTitle,
+		Description:       req.Description,
+		CustomerAddressID: req.CustomerAddressID,
+		Status:            domain.BookingRequested,
+
+		MediaURLs:   req.MediaURLs,
+		IsFlexible:  req.IsFlexible,
+		ScheduledAt: req.ScheduledAt,
+
+		// Defaults/Calculated
+		Priority:          defaultPriority,
+		IsSpecificArtisan: isSpecificArtisan,
+
+		Metadata:  make(map[string]string),
+		CreatedAt: time.Now(),
+		UpdatedAt: time.Now(),
+		Version:   1,
+	}
+
+	// Validate references (e.g. does category exist?)
 	if err := binternal.ValidateBookingReferences(ctx, domainReq, userCtx.ID, h.logger); err != nil {
 		h.logger.Error(ctx, "service reference validation failed", err, map[string]interface{}{
 			"user_id": userCtx.ID,
@@ -500,20 +516,20 @@ func (h *BookingsHandler) toResponse(booking *domain.Booking) *BookingResponse {
 		scheduledAt = booking.ScheduledAt
 	}
 	return &BookingResponse{
-		ID:                    booking.ID,
-		CustomerID:            booking.CustomerID,
-		ArtisanID:             artisanID,
-		ServiceCategoryID:     booking.ServiceCategoryID,
-		Title:                 booking.Title,
-		Description:           booking.Description,
-		CustomerAddressID:     booking.CustomerAddressID,
-		Status:                booking.Status,
-		Priority:              booking.Priority,
-		ScheduledAt:           scheduledAt,
-		EstimatedDurationMins: booking.EstimatedDurationMins,
-		Metadata:              booking.Metadata,
-		CreatedAt:             booking.CreatedAt,
-		UpdatedAt:             booking.UpdatedAt,
+		ID:                booking.ID,
+		CustomerID:        booking.CustomerID,
+		ArtisanID:         artisanID,
+		ServiceCategoryID: booking.ServiceCategoryID,
+		Title:             booking.Title,
+		Description:       booking.Description,
+		CustomerAddressID: booking.CustomerAddressID,
+		Status:            booking.Status,
+		Priority:          booking.Priority,
+		IsFlexible:        booking.IsFlexible,
+		ScheduledAt:       scheduledAt,
+		Metadata:          booking.Metadata,
+		CreatedAt:         booking.CreatedAt,
+		UpdatedAt:         booking.UpdatedAt,
 	}
 }
 

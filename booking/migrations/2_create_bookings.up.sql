@@ -6,12 +6,15 @@ create table bookings (
     artisan_id uuid,           -- Reference to artisan service
     service_category_id text not null, -- Reference to service categories
     title text not null check (length(title) >= 5 and length(title) <= 100),
+    service_id uuid,                   -- Reference to service item
+    media_urls text[],
+    is_flexible boolean DEFAULT false,
     description text check (length(description) >= 20),
     customer_address_id uuid not null, -- Reference to customer service 
     status varchar(20) not null default 'pending_payment',
     priority varchar(10) default 'normal',
     scheduled_at timestamptz,
-    estimated_duration_mins integer check (estimated_duration_mins > 0 and estimated_duration_mins <= 1440), -- 1 day max
+
     metadata jsonb, -- For future extensibility
     created_at timestamptz not null default now(),
     updated_at timestamptz not null default now(),
