@@ -185,6 +185,51 @@ func (h *MessagesHandler) GetMessages(ctx context.Context, threadID string, para
 	}, nil
 }
 
+// GetMessagesByBookingID retrieves paginated messages from a thread using a booking ID
+func (h *MessagesHandler) GetMessagesByBookingID(ctx context.Context, bookingID string, params *ListMessagesRequest) (*MessagesResponse, error) {
+	userCtx, err := h.authHelper.ExtractUserContext(ctx, "get_messages_by_booking_id")
+	if err != nil {
+		h.logger.Error(ctx, "failed to extract user context", err, nil)
+		return nil, err
+	}
+
+	userID := userCtx.ID
+
+	// Verify thread exists and user has access
+	thread, err := h.threadRepo.GetByBookingID(ctx, bookingID)
+	if err != nil {
+		return nil, internal.HandleRepositoryError(err)
+	}
+
+	if err := internal.AuthorizeReadMessages(ctx, userID, thread); err != nil {
+		return nil, err
+	}
+
+	// Normalize pagination parameters
+	offset, limit, err := internal.HandlePaginationParams(params.Offset, params.Limit)
+	if err != nil {
+		return nil, err
+	}
+	params.Offset = offset
+	params.Limit = limit
+
+	// Get messages
+	messages, err := h.messageRepo.GetByThreadID(ctx, thread.ID, params.Limit, params.Offset)
+	if err != nil {
+		return nil, internal.HandleRepositoryError(err)
+	}
+
+	responses := make([]*MessageResponse, len(messages))
+	for i, msg := range messages {
+		responses[i] = MessageToResponse(msg)
+	}
+
+	return &MessagesResponse{
+		Messages: responses,
+		Total:    len(responses),
+	}, nil
+}
+
 // MarkThreadAsRead marks all messages in a thread as read
 func (h *MessagesHandler) MarkThreadAsRead(ctx context.Context, threadID string) error {
 	userCtx, err := h.authHelper.ExtractUserContext(ctx, "mark_thread_as_read")

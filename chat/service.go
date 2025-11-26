@@ -156,6 +156,17 @@ func GetMessages(ctx context.Context, threadId string) (*handlers.MessagesRespon
 	return svc.MessagesHandler.GetMessages(ctx, threadId, params)
 }
 
+// GetMessagesByBookingID retrieves messages from a thread by booking ID
+//
+//encore:api auth method=GET path=/v0/chat/bookings/:bookingId/messages
+func GetMessagesByBookingID(ctx context.Context, bookingId string, params *handlers.ListMessagesRequest) (*handlers.MessagesResponse, error) {
+	svc, err := initService()
+	if err != nil {
+		return nil, err
+	}
+	return svc.MessagesHandler.GetMessagesByBookingID(ctx, bookingId, params)
+}
+
 // MarkThreadAsRead marks thread messages as read
 //
 //encore:api auth method=PUT path=/v0/chat/threads/:threadId/read
