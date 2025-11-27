@@ -1,6 +1,7 @@
 package handlers
 
 import (
+	"encoding/json"
 	"sync"
 	"time"
 
@@ -30,18 +31,19 @@ type ListMessagesRequest struct {
 
 // Response DTOs
 type MessageResponse struct {
-	ID             string     `json:"id"`
-	ThreadID       string     `json:"thread_id"`
-	SenderID       string     `json:"sender_id"`
-	Content        string     `json:"content"`
-	MessageType    string     `json:"message_type"`
-	Status         string     `json:"status"`
-	IdempotencyKey string     `json:"idempotency_key"`
-	SentAt         *time.Time `json:"sent_at,omitempty"`
-	DeliveredAt    *time.Time `json:"delivered_at,omitempty"`
-	ReadAt         *time.Time `json:"read_at,omitempty"`
-	CreatedAt      time.Time  `json:"created_at"`
-	UpdatedAt      time.Time  `json:"updated_at"`
+	ID             string          `json:"id"`
+	ThreadID       string          `json:"thread_id"`
+	SenderID       string          `json:"sender_id"`
+	Content        string          `json:"content"`
+	MessageType    string          `json:"message_type"`
+	Status         string          `json:"status"`
+	IdempotencyKey string          `json:"idempotency_key"`
+	SentAt         *time.Time      `json:"sent_at,omitempty"`
+	DeliveredAt    *time.Time      `json:"delivered_at,omitempty"`
+	ReadAt         *time.Time      `json:"read_at,omitempty"`
+	CreatedAt      time.Time       `json:"created_at"`
+	UpdatedAt      time.Time       `json:"updated_at"`
+	Metadata       json.RawMessage `json:"metadata,omitempty"`
 }
 
 type ThreadResponse struct {
@@ -66,17 +68,18 @@ type MessagesResponse struct {
 
 // WSMessage represents a message sent over WebSocket
 type WSMessage struct {
-	ID             string     `json:"id"`
-	ThreadID       string     `json:"thread_id"`
-	SenderID       string     `json:"sender_id"`
-	Content        string     `json:"content"`
-	MessageType    string     `json:"message_type"`
-	Status         string     `json:"status"`
-	IdempotencyKey string     `json:"idempotency_key"`
-	SentAt         time.Time  `json:"sent_at"`
-	DeliveredAt    *time.Time `json:"delivered_at,omitempty"`
-	ReadAt         *time.Time `json:"read_at,omitempty"`
-	Type           string     `json:"type,omitempty"`
+	ID             string          `json:"id"`
+	ThreadID       string          `json:"thread_id"`
+	SenderID       string          `json:"sender_id"`
+	Content        string          `json:"content"`
+	MessageType    string          `json:"message_type"`
+	Status         string          `json:"status"`
+	IdempotencyKey string          `json:"idempotency_key"`
+	SentAt         time.Time       `json:"sent_at"`
+	DeliveredAt    *time.Time      `json:"delivered_at,omitempty"`
+	ReadAt         *time.Time      `json:"read_at,omitempty"`
+	Metadata       json.RawMessage `json:"metadata,omitempty"`
+	Type           string          `json:"type,omitempty"`
 }
 
 // WebSocketManager manages active WebSocket connections per thread.
@@ -121,6 +124,7 @@ func MessageToResponse(msg *domain.Message) *MessageResponse {
 		ReadAt:         msg.ReadAt,
 		CreatedAt:      msg.CreatedAt,
 		UpdatedAt:      msg.UpdatedAt,
+		Metadata:       json.RawMessage(msg.Metadata),
 	}
 }
 

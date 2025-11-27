@@ -16,6 +16,7 @@ import (
 	topics_booking "encore.app/core/events/topics/booking"
 	"encore.dev/pubsub"
 	"github.com/google/uuid"
+	"gorm.io/datatypes"
 )
 
 const SystemSenderID = "00000000-0000-0000-0000-000000000000"
@@ -266,7 +267,18 @@ func (s *BookingSubscriber) createAutomatedMessage(
 	template domain.AutomatedMessageTemplate,
 	event *bookingdomain.BookingEvent,
 ) error {
-	// Build template data
+	// Build message metadata
+	metadataJSON := datatypes.JSON(nil)
+	if fn := template.MetadataFunc; fn != nil {
+		if metadataMap := fn(event); len(metadataMap) > 0 {
+			if bytes, err := json.Marshal(metadataMap); err != nil {
+				log.Printf("Failed to marshal message metadata: %v", err)
+			} else {
+				metadataJSON = bytes
+			}
+		}
+	}
+
 	data := buildTemplateData(event)
 
 	// Generate message content
@@ -283,6 +295,7 @@ func (s *BookingSubscriber) createAutomatedMessage(
 		Status:         domain.MessageSent,
 		SentAt:         &now,
 		IdempotencyKey: fmt.Sprintf("auto-%s-%s", event.BookingID, event.Status),
+		Metadata:       metadataJSON, // ✅ Now includes useful IDs
 		CreatedAt:      now,
 		UpdatedAt:      now,
 	}
@@ -299,7 +312,8 @@ func (s *BookingSubscriber) createAutomatedMessage(
 		SenderID: msg.SenderID,
 		Content:  msg.Content,
 		Status:   string(msg.Status),
-		SentAt:   now, // ✅ FIXED: time.Time value (not pointer)
+		SentAt:   now,
+		Metadata: json.RawMessage(msg.Metadata), // Include metadata in WebSocket broadcast
 	})
 
 	return nil
@@ -316,8 +330,6 @@ func buildTemplateData(event *bookingdomain.BookingEvent) map[string]interface{}
 	// Add artisan info if available
 	if event.ArtisanID != nil {
 		data["artisan_id"] = *event.ArtisanID
-		// In production, fetch artisan name from user service
-		// For now, use placeholder
 	}
 
 	for k, v := range event.Metadata {
@@ -352,11 +364,11 @@ func buildTemplateData(event *bookingdomain.BookingEvent) map[string]interface{}
 		data["amount"] = float64(0)
 	}
 
-	// Add currency (default to USD)
+	// Add currency (default to NGN)
 	if currency, ok := event.Metadata["currency"]; ok {
 		data["currency"] = currency
 	} else {
-		data["currency"] = "USD"
+		data["currency"] = "NGN"
 	}
 
 	// Add reason if present
