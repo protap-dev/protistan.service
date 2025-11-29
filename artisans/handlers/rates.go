@@ -39,7 +39,7 @@ type RateWithServiceInfo struct {
 	ServiceID          string `json:"service_id"`
 	ServiceName        string `json:"service_name"`
 	ServiceDescription string `json:"service_description"`
-	CategoryName       string `json:"category_name"`
+	CategoryID         string `json:"category_id"`
 	HourlyRateCents    *int64 `json:"hourly_rate_cents,omitempty"`
 	MinimumChargeCents *int64 `json:"minimum_charge_cents,omitempty"`
 	Currency           string `json:"currency"`
@@ -68,9 +68,9 @@ func NewRatesHandler(service *domain.RatesService, authHelper *internal.AuthHelp
 	}
 }
 
-// GetArtisanRates handles GET /artisans/rates/:id
-func (h *RatesHandler) GetArtisanRates(ctx context.Context, artisanID string) (*GetArtisanRatesResponse, error) {
-	result, err := h.service.GetArtisanRates(ctx, artisanID)
+// GetArtisanRatesByArtisanID handles GET /artisans/rates/artisan/:id
+func (h *RatesHandler) GetArtisanRatesByArtisanID(ctx context.Context, artisanID string) (*GetArtisanRatesResponse, error) {
+	result, err := h.service.GetArtisanRatesByArtisanID(ctx, artisanID)
 	if err != nil {
 		return nil, err
 	}
@@ -82,7 +82,7 @@ func (h *RatesHandler) GetArtisanRates(ctx context.Context, artisanID string) (*
 			ServiceID:          rate.ServiceID,
 			ServiceName:        rate.ServiceName,
 			ServiceDescription: rate.ServiceDescription,
-			CategoryName:       rate.CategoryName,
+			CategoryID:         rate.CategoryID,
 			HourlyRateCents:    rate.HourlyRateCents,
 			MinimumChargeCents: rate.MinimumChargeCents,
 			Currency:           rate.Currency,
@@ -131,7 +131,7 @@ func (h *RatesHandler) UpdateRates(ctx context.Context, req *UpdateArtisanRatesR
 			ServiceID:          rate.ServiceID,
 			ServiceName:        rate.ServiceName,
 			ServiceDescription: rate.ServiceDescription,
-			CategoryName:       rate.CategoryName,
+			CategoryID:         rate.CategoryID,
 			HourlyRateCents:    rate.HourlyRateCents,
 			MinimumChargeCents: rate.MinimumChargeCents,
 			Currency:           rate.Currency,

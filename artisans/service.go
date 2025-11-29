@@ -84,7 +84,7 @@ func (s *Service) GetArtisanProfile(ctx context.Context, id string) (*domain.Pub
 
 //encore:api public method=GET path=/v0/artisans/rates/:id
 func (s *Service) GetArtisanRates(ctx context.Context, id string) (*handlers.GetArtisanRatesResponse, error) {
-	return s.ratesHandler.GetArtisanRates(ctx, id)
+	return s.ratesHandler.GetArtisanRatesByArtisanID(ctx, id)
 }
 
 //encore:api auth method=PUT path=/v0/artisans/rates

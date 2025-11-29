@@ -228,7 +228,7 @@ func (s *ProfileService) UpdateProfile(ctx context.Context, userCtx *internal.Us
 		}
 
 		// 7. Reload updated profile within transaction
-		result, err = txRepo.GetByID(ctx, existing.ID)
+		result, err = txRepo.GetByArtisanID(ctx, existing.ID)
 		if err != nil {
 			return internal.ErrDatabaseError
 		}
@@ -452,34 +452,6 @@ func (s *ProfileService) createNew(ctx context.Context, input *CreateProfileInpu
 
 	s.logger.LogArtisanAction(ctx, "profile_created", artisan.ID, userID)
 	return artisan, nil
-}
-
-func (s *ProfileService) updateExisting(ctx context.Context, existing *ArtisanProfile, input *CreateProfileInput, userID string) (*ArtisanProfile, error) {
-	updates := map[string]any{
-		"category_ids":           input.CategoryIDs,
-		"bio":                    input.Bio,
-		"years_experience":       input.YearsExperience,
-		"languages":              input.Languages,
-		"max_travel_distance_km": input.MaxTravelDistanceKm,
-		"avatar_url":             input.AvatarURL,
-		"preferred_city":         input.PreferredCity,
-		"preferred_state":        input.PreferredState,
-		"preferred_country":      input.PreferredCountry,
-	}
-
-	if err := s.repo.Update(ctx, existing.ID, updates); err != nil {
-		s.logger.LogError(ctx, "update_existing_profile", err)
-		return nil, internal.ErrDatabaseError
-	}
-
-	updated, err := s.repo.GetByID(ctx, existing.ID)
-	if err != nil {
-		s.logger.LogError(ctx, "reload_updated_profile", err)
-		return nil, internal.ErrDatabaseError
-	}
-
-	s.logger.LogArtisanAction(ctx, "profile_updated", existing.ID, userID)
-	return updated, nil
 }
 
 func (s *ProfileService) buildUpdates(input *UpdateProfileInput) map[string]any {

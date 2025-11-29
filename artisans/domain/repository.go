@@ -16,6 +16,7 @@ var (
 type ArtisanRepository interface {
 	Create(ctx context.Context, profile *ArtisanProfile) error
 	GetByID(ctx context.Context, id string) (*ArtisanProfile, error)
+	GetByArtisanID(ctx context.Context, artisanID string) (*ArtisanProfile, error)
 	Update(ctx context.Context, id string, updates map[string]any) error
 	Delete(ctx context.Context, id string) error
 

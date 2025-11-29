@@ -45,6 +45,7 @@ CREATE TABLE artisans (
     rating DECIMAL(3,2) DEFAULT 0.00 CHECK (rating >= 0 AND rating <= 5),
     reviews_count INTEGER DEFAULT 0 CHECK (reviews_count >= 0),
     verified BOOLEAN DEFAULT FALSE,
+    accepts_generic_requests BOOLEAN DEFAULT FALSE,
     max_travel_distance_km DECIMAL(10,2) DEFAULT 50 CHECK (max_travel_distance_km >= 0 AND max_travel_distance_km <= 500),
     avatar_url TEXT,
     
