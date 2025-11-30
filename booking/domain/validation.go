@@ -11,6 +11,7 @@ import (
 
 // CreateBookingRequest represents the request to create a booking (for validation)
 type CreateBookingRequest struct {
+	IdempotencyKey    *string           `json:"idempotency_key,omitempty"`
 	SpecificArtisanID string            `json:"specific_artisan_id,omitempty"`
 	ServiceCategoryID string            `json:"service_category_id"`
 	ServiceID         string            `json:"service_id"`

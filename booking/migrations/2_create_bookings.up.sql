@@ -57,8 +57,23 @@ CREATE TABLE IF NOT EXISTS booking_status_history (
     created_at timestamptz default now()
 );
 
+-- Create idempotency table history for idempotency handling
+CREATE TABLE IF NOT EXISTS idempotency_keys (
+    idempotency_key VARCHAR(255) PRIMARY KEY,
+    user_id UUID NOT NULL,
+    request_hash TEXT NOT NULL, -- Hash of request body
+    booking_id UUID, -- Result reference
+    response_body JSONB, -- Cached response
+    status VARCHAR(20) NOT NULL DEFAULT 'processing', -- processing, completed, failed
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    completed_at TIMESTAMPTZ,
+    expires_at TIMESTAMPTZ NOT NULL
+);
+
 -- Indexes for performance
 create index IF NOT EXISTS idx_bookings_customer on bookings (customer_id, created_at desc);
 create index IF NOT EXISTS idx_bookings_artisan on bookings (artisan_id, created_at desc);
 CREATE INDEX IF NOT EXISTS idx_bookings_status ON bookings(status);
 CREATE INDEX IF NOT EXISTS idx_bookings_created_at ON bookings(created_at);
+CREATE INDEX idx_idempotency_keys_expires_at ON idempotency_keys(expires_at);
+CREATE INDEX idx_idempotency_keys_user_id ON idempotency_keys(user_id);

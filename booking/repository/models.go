@@ -178,3 +178,20 @@ func offerToDomainModel(dbOffer *offerDBModel) *domain.BookingOffer {
 		UpdatedAt:    dbOffer.UpdatedAt,
 	}
 }
+
+// IdempotencyRecord represents the idempotency key storage
+type IdempotencyRecord struct {
+	IdempotencyKey string     `gorm:"primaryKey;column:idempotency_key;type:varchar(255)"`
+	UserID         string     `gorm:"column:user_id;type:uuid;not null;index"`
+	RequestHash    string     `gorm:"column:request_hash;type:text;not null"`
+	BookingID      *string    `gorm:"column:booking_id;type:uuid"`
+	ResponseBody   []byte     `gorm:"column:response_body;type:jsonb"`
+	Status         string     `gorm:"column:status;type:varchar(20);not null;default:'processing'"`
+	CreatedAt      time.Time  `gorm:"column:created_at;not null;default:now()"`
+	CompletedAt    *time.Time `gorm:"column:completed_at"`
+	ExpiresAt      time.Time  `gorm:"column:expires_at;not null;index"`
+}
+
+func (IdempotencyRecord) TableName() string {
+	return "idempotency_keys"
+}

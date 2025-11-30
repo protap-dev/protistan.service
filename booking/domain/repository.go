@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"time"
 
 	"gorm.io/gorm"
 )
@@ -61,4 +62,22 @@ type BookingRepository interface {
 	FindExpiredOffers(ctx context.Context) ([]*BookingOffer, error)
 	UpdateOffer(ctx context.Context, offer *BookingOffer) error
 	CreateOfferExpiredEventInOutbox(ctx context.Context, event *BookingEvent) error
+
+	// Idempotency key methods
+	CheckIdempotencyKey(ctx context.Context, key string, userID string, requestHash string) (*IdempotencyRecord, error)
+	StoreIdempotencyKey(ctx context.Context, key string, userID string, requestHash string, expiresAt time.Time) error
+	CompleteIdempotencyKey(ctx context.Context, key string, bookingID string, response interface{}) error
+}
+
+// IdempotencyRecord represents the idempotency key storage (domain model)
+type IdempotencyRecord struct {
+	IdempotencyKey string
+	UserID         string
+	RequestHash    string
+	BookingID      *string
+	ResponseBody   []byte
+	Status         string
+	CreatedAt      time.Time
+	CompletedAt    *time.Time
+	ExpiresAt      time.Time
 }

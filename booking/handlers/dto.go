@@ -7,6 +7,7 @@ import (
 )
 
 type CreateBookingRequest struct {
+	IdempotencyKey    *string           `json:"idempotency_key,omitempty"`
 	ServiceCategoryID string            `json:"service_category_id"`
 	ServiceID         string            `json:"service_id"`
 	Description       string            `json:"description,omitempty"`

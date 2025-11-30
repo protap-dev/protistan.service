@@ -2,6 +2,9 @@ package handlers
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"slices"
@@ -66,6 +69,50 @@ func (h *BookingsHandler) CreateBooking(ctx context.Context, req *CreateBookingR
 		return nil, err
 	}
 
+	// Handle idempotency key if provided
+	if req.IdempotencyKey != nil && *req.IdempotencyKey != "" {
+		// Generate request hash from request body for validation
+		requestHash := generateRequestHash(req)
+
+		// Check if this idempotency key was already processed
+		existingRecord, err := h.repo.CheckIdempotencyKey(ctx, *req.IdempotencyKey, userCtx.ID, requestHash)
+		if err != nil {
+			h.logger.Error(ctx, "idempotency key check failed", err, map[string]interface{}{
+				"user_id": userCtx.ID,
+			})
+			return nil, binternal.ErrDatabaseError
+		}
+
+		if existingRecord != nil {
+			// Request already processed
+			if existingRecord.Status == "completed" {
+				// Return cached response
+				var cachedResponse BookingResponse
+				if err := json.Unmarshal(existingRecord.ResponseBody, &cachedResponse); err == nil {
+					return &cachedResponse, nil
+				}
+			}
+
+			if existingRecord.Status == "processing" {
+				// Another request is currently processing - return conflict
+				return nil, errs.B().Code(errs.Aborted).
+					Msg("request with this idempotency key is already being processed").Err()
+			}
+		}
+
+		// Store idempotency key atomically (24 hour expiration)
+		expiresAt := time.Now().Add(24 * time.Hour)
+		err = h.repo.StoreIdempotencyKey(ctx, *req.IdempotencyKey, userCtx.ID, requestHash, expiresAt)
+		if err != nil {
+			// If duplicate key error, another concurrent request won - return conflict
+			if strings.Contains(err.Error(), "duplicate") {
+				return nil, errs.B().Code(errs.Aborted).
+					Msg("request with this idempotency key is already being processed").Err()
+			}
+			return nil, binternal.ErrDatabaseError
+		}
+	}
+
 	var artisanID *string
 	isSpecificArtisan := false
 	if req.SpecificArtisanID != nil && *req.SpecificArtisanID != "" {
@@ -92,7 +139,7 @@ func (h *BookingsHandler) CreateBooking(ctx context.Context, req *CreateBookingR
 		return nil, binternal.ErrInvalidInput
 	}
 
-	// Generate a title automatically - TODO: Make this event based if possible, i.e subscribe to receive name from core db
+	// Generate a title automatically
 	var autoTitle string
 	serviceName := req.Metadata["service_name"]
 	if serviceName != "" {
@@ -116,22 +163,18 @@ func (h *BookingsHandler) CreateBooking(ctx context.Context, req *CreateBookingR
 		Description:       req.Description,
 		CustomerAddressID: req.CustomerAddressID,
 		Status:            domain.BookingRequested,
-
-		MediaURLs:   req.MediaURLs,
-		IsFlexible:  req.IsFlexible,
-		ScheduledAt: req.ScheduledAt,
-
-		// Defaults/Calculated
+		MediaURLs:         req.MediaURLs,
+		IsFlexible:        req.IsFlexible,
+		ScheduledAt:       req.ScheduledAt,
 		Priority:          defaultPriority,
 		IsSpecificArtisan: isSpecificArtisan,
-
-		Metadata:  make(map[string]string),
-		CreatedAt: time.Now(),
-		UpdatedAt: time.Now(),
-		Version:   1,
+		Metadata:          make(map[string]string),
+		CreatedAt:         time.Now(),
+		UpdatedAt:         time.Now(),
+		Version:           1,
 	}
 
-	// Validate references (e.g. does category exist?)
+	// Validate references
 	if err := binternal.ValidateBookingReferences(ctx, domainReq, userCtx.ID, h.logger); err != nil {
 		h.logger.Error(ctx, "service reference validation failed", err, map[string]interface{}{
 			"user_id": userCtx.ID,
@@ -148,7 +191,7 @@ func (h *BookingsHandler) CreateBooking(ctx context.Context, req *CreateBookingR
 
 	h.cache.Set(ctx, binternal.BookingCacheKey(booking.ID), booking, binternal.DefaultServiceConfig().Cache.BookingTTL)
 
-	// Create and publish created event within transaction context for atomicity
+	// Create and publish created event
 	event := &domain.BookingEvent{
 		BookingID:      booking.ID,
 		Status:         booking.Status,
@@ -157,15 +200,20 @@ func (h *BookingsHandler) CreateBooking(ctx context.Context, req *CreateBookingR
 		UserID:         userCtx.ID,
 	}
 
-	// Use the repository's outbox method for atomic event publishing
 	if err := h.repo.CreateEventInOutbox(ctx, event); err != nil {
 		h.logger.Error(ctx, "failed to publish booking created event", err, map[string]interface{}{
 			"booking_id": booking.ID,
 		})
-		// Don't fail the request if event publishing fails - the booking was created successfully
 	}
 
-	return h.toResponse(booking), nil
+	response := h.toResponse(booking)
+
+	// Complete idempotency key if provided
+	if req.IdempotencyKey != nil && *req.IdempotencyKey != "" {
+		_ = h.repo.CompleteIdempotencyKey(ctx, *req.IdempotencyKey, booking.ID, response)
+	}
+
+	return response, nil
 }
 
 func (h *BookingsHandler) UpdateBookingStatus(ctx context.Context, id string, req *UpdateStatusRequest) (*BookingResponse, error) {
@@ -547,4 +595,18 @@ func (h *BookingsHandler) toOfferResponse(offer *domain.BookingOffer) *OfferResp
 		CreatedAt:    offer.CreatedAt,
 		UpdatedAt:    offer.UpdatedAt,
 	}
+}
+
+func generateRequestHash(req *CreateBookingRequest) string {
+	// Create deterministic hash of request fields (excluding idempotency key)
+	data := fmt.Sprintf("%s|%s|%s|%s|%v|%v",
+		req.ServiceCategoryID,
+		req.ServiceID,
+		req.CustomerAddressID,
+		req.Description,
+		req.ScheduledAt,
+		req.IsFlexible,
+	)
+	hash := sha256.Sum256([]byte(data))
+	return hex.EncodeToString(hash[:])
 }
