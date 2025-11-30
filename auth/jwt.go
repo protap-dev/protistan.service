@@ -15,7 +15,7 @@ func (s *Service) generateJWT(userID, email, userType string, profileComplete bo
 		UserType:        userType,
 		ProfileComplete: profileComplete,
 		RegisteredClaims: jwt.RegisteredClaims{
-			ExpiresAt: jwt.NewNumericDate(time.Now().Add(24 * time.Hour)),
+			ExpiresAt: jwt.NewNumericDate(time.Now().Add(30 * time.Minute)),
 			IssuedAt:  jwt.NewNumericDate(time.Now()),
 		},
 	}
@@ -47,4 +47,24 @@ func parseJWT(tokenStr string) (claims *JWTClaims, err error) {
 		return nil, errors.New("invalid claims")
 	}
 	return claims, nil
+}
+
+// createRefreshToken creates a refresh token for the authenticated user
+func (s *Service) createRefreshToken(userID string) (string, error) {
+	token, err := generateSecureToken(32)
+	if err != nil {
+		return "", err
+	}
+
+	refreshToken := RefreshToken{
+		UserID:    userID,
+		Token:     token,
+		ExpiresAt: time.Now().Add(30 * 24 * time.Hour), // 30 days
+	}
+
+	if err := s.db.Create(&refreshToken).Error; err != nil {
+		return "", err
+	}
+
+	return token, nil
 }

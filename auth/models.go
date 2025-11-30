@@ -33,6 +33,19 @@ type EmailVerificationToken struct {
 	CreatedAt time.Time `json:"created_at" gorm:"autoCreateTime"`
 }
 
+// RefreshToken represents a refresh token in the database
+type RefreshToken struct {
+	ID        string    `json:"id" gorm:"primarykey;type:uuid;default:generate_uuid()"`
+	UserID    string    `json:"user_id" gorm:"not null;index"`
+	Token     string    `json:"token" gorm:"unique;not null"`
+	ExpiresAt time.Time `json:"expires_at" gorm:"not null"`
+	CreatedAt time.Time `json:"created_at" gorm:"autoCreateTime"`
+}
+
+type RefreshRequest struct {
+	RefreshToken string `json:"refresh_token"`
+}
+
 // SendVerificationEmailRequest represents a request to send an email verification token
 type SendVerificationEmailRequest struct {
 	Email string `json:"email"`
@@ -71,7 +84,8 @@ type RegisterRequest struct {
 }
 
 type AuthResponse struct {
-	Token string `json:"token"`
+	Token        string `json:"token"`
+	RefreshToken string `json:"refresh_token"`
 }
 
 type LoginRequest struct {

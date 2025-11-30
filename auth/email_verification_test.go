@@ -33,15 +33,23 @@ func Test_EmailVerificationFlow(t *testing.T) {
 
 		mock.ExpectBegin()
 		mock.ExpectQuery(regexp.QuoteMeta(`INSERT INTO "users"`)).
-			WithArgs(email, sqlmock.AnyArg(), false, "customer", false, sqlmock.AnyArg(), sqlmock.AnyArg()).
+			WithArgs(email, sqlmock.AnyArg(), false, "customer", true, sqlmock.AnyArg(), sqlmock.AnyArg()).
 			WillReturnRows(sqlmock.NewRows([]string{"id", "email", "email_verified"}).
 				AddRow(userID, email, false))
 		mock.ExpectCommit()
 
-		regReq := &RegisterRequest{Email: email, Password: password}
+		// Mock refresh token creation using GORM Create with RETURNING
+		mock.ExpectBegin()
+		mock.ExpectQuery(regexp.QuoteMeta(`INSERT INTO "refresh_tokens"`)).
+			WithArgs(userID, sqlmock.AnyArg(), sqlmock.AnyArg(), sqlmock.AnyArg()).
+			WillReturnRows(sqlmock.NewRows([]string{"id"}).AddRow("refresh-token-id"))
+		mock.ExpectCommit()
+
+		regReq := &RegisterRequest{Email: email, Password: password, UserType: "customer"}
 		regResp, err := svc.Register(ctx, regReq)
 		require.NoError(t, err)
 		assert.NotEmpty(t, regResp.Token)
+		assert.NotEmpty(t, regResp.RefreshToken)
 
 		// Step 2: Request verification email
 		mock.ExpectQuery(regexp.QuoteMeta(`SELECT * FROM "users" WHERE email = $1 ORDER BY "users"."id" LIMIT $2`)).
