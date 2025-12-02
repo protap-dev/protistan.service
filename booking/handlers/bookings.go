@@ -59,6 +59,19 @@ func (h *BookingsHandler) GetRepository() domain.BookingRepository {
 	return h.repo
 }
 
+// Helper function to copy metadata safely
+func copyMetadata(src map[string]string) map[string]string {
+	if src == nil {
+		return make(map[string]string)
+	}
+
+	dst := make(map[string]string, len(src))
+	for k, v := range src {
+		dst[k] = v
+	}
+	return dst
+}
+
 // =============================
 // API Methods (Handler Level)
 // =============================
@@ -115,9 +128,11 @@ func (h *BookingsHandler) CreateBooking(ctx context.Context, req *CreateBookingR
 
 	var artisanID *string
 	isSpecificArtisan := false
+	var specificArtisanID string // Store separately for auto-offer creation
 	if req.SpecificArtisanID != nil && *req.SpecificArtisanID != "" {
 		isSpecificArtisan = true
-		artisanID = req.SpecificArtisanID
+		specificArtisanID = *req.SpecificArtisanID
+		// Don't set artisanID here - create booking without artisan first
 	}
 
 	// Construct the domain request for validation
@@ -156,7 +171,7 @@ func (h *BookingsHandler) CreateBooking(ctx context.Context, req *CreateBookingR
 
 	booking := &domain.Booking{
 		CustomerID:        userCtx.ID,
-		ArtisanID:         artisanID,
+		ArtisanID:         artisanID, // Will be nil for auto-offer case
 		ServiceCategoryID: req.ServiceCategoryID,
 		ServiceID:         req.ServiceID,
 		Title:             autoTitle,
@@ -168,7 +183,7 @@ func (h *BookingsHandler) CreateBooking(ctx context.Context, req *CreateBookingR
 		ScheduledAt:       req.ScheduledAt,
 		Priority:          defaultPriority,
 		IsSpecificArtisan: isSpecificArtisan,
-		Metadata:          make(map[string]string),
+		Metadata:          copyMetadata(req.Metadata), // Copy request metadata
 		CreatedAt:         time.Now(),
 		UpdatedAt:         time.Now(),
 		Version:           1,
@@ -206,7 +221,32 @@ func (h *BookingsHandler) CreateBooking(ctx context.Context, req *CreateBookingR
 		})
 	}
 
+	// Auto-create offer if specific artisan is requested
+	var offer *domain.BookingOffer
+	if isSpecificArtisan && specificArtisanID != "" {
+		offer, err = h.CreateOfferInternal(ctx, booking.ID, specificArtisanID, userCtx.ID, 24) // Default 24 hours
+		if err != nil {
+			h.logger.Error(ctx, "failed to create automatic offer for specific artisan", err, map[string]any{
+				"booking_id": booking.ID,
+				"artisan_id": specificArtisanID,
+			})
+			// Don't fail the entire booking creation, just log the error
+			// The booking exists and can be offered manually later
+		}
+	}
+
 	response := h.toResponse(booking)
+
+	// Add offer metadata to response if offer was created
+	if offer != nil {
+		if response.Metadata == nil {
+			response.Metadata = make(map[string]string)
+		}
+		response.Metadata["offer_id"] = offer.ID
+		response.Metadata["offer_status"] = string(offer.Status)
+		response.Metadata["offer_expires_at"] = offer.ExpiresAt.Format(time.RFC3339)
+		response.Metadata["auto_offered"] = "true"
+	}
 
 	// Complete idempotency key if provided
 	if req.IdempotencyKey != nil && *req.IdempotencyKey != "" {

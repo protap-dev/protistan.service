@@ -15,6 +15,95 @@ import (
 // Offer Handler Methods
 // =============================
 
+// CreateOfferInternal creates an offer for a booking to an artisan
+// This is the core offer creation logic that can be reused from different contexts
+func (h *BookingsHandler) CreateOfferInternal(ctx context.Context, bookingID string, artisanID string, offeredBy string, expiresIn int) (*domain.BookingOffer, error) {
+	// Set default expiration (24 hours)
+	if expiresIn == 0 {
+		expiresIn = 24
+	}
+	if expiresIn > 72 {
+		return nil, fmt.Errorf("expires_in cannot exceed 72 hours")
+	}
+
+	// Create offer and update booking status in transaction
+	var offer *domain.BookingOffer
+
+	err := h.repo.WithTransaction(ctx, func(txRepo domain.BookingRepository) error {
+		// Get fresh booking for status update and validation
+		currentBooking, err := txRepo.GetByID(ctx, bookingID)
+		if err != nil {
+			return fmt.Errorf("failed to get booking: %w", err)
+		}
+
+		// Validate offer can be created
+		if err := h.offerValidator.ValidateOfferCreation(currentBooking, artisanID); err != nil {
+			return err
+		}
+
+		// Create offer
+		offer = &domain.BookingOffer{
+			ID:        binternal.GenerateUUID(),
+			BookingID: bookingID,
+			ArtisanID: artisanID,
+			Status:    domain.OfferPending,
+			OfferedBy: offeredBy,
+			OfferedAt: time.Now(),
+			ExpiresAt: time.Now().Add(time.Duration(expiresIn) * time.Hour),
+			CreatedAt: time.Now(),
+			UpdatedAt: time.Now(),
+		}
+
+		if err := txRepo.CreateOffer(ctx, offer); err != nil {
+			return fmt.Errorf("failed to create offer: %w", err)
+		}
+
+		// Update booking status to OfferPending
+		currentBooking.Status = domain.BookingOfferPending
+		currentBooking.UpdatedAt = time.Now()
+		currentBooking.OffersCount++
+
+		if err := txRepo.Update(ctx, currentBooking); err != nil {
+			return fmt.Errorf("failed to update booking status: %w", err)
+		}
+
+		// Create event in outbox
+		event := &domain.BookingEvent{
+			BookingID:      bookingID,
+			Status:         domain.BookingOfferPending,
+			PreviousStatus: domain.BookingRequested,
+			Timestamp:      time.Now(),
+			UserID:         offeredBy,
+			ArtisanID:      &offer.ArtisanID,
+		}
+
+		if err := txRepo.CreateEventInOutbox(ctx, event); err != nil {
+			return fmt.Errorf("failed to create event: %w", err)
+		}
+
+		return nil
+	})
+
+	if err != nil {
+		h.logger.Error(ctx, "failed to create offer and update booking", err, map[string]any{
+			"booking_id": bookingID,
+			"artisan_id": artisanID,
+		})
+		return nil, err
+	}
+
+	// Clear cache
+	h.cache.Delete(ctx, binternal.BookingCacheKey(bookingID))
+
+	h.logger.Info(ctx, "booking offered to artisan", map[string]any{
+		"booking_id": bookingID,
+		"offer_id":   offer.ID,
+		"artisan_id": artisanID,
+	})
+
+	return offer, nil
+}
+
 // OfferBooking offers a booking to a specific artisan
 func (h *BookingsHandler) OfferBooking(ctx context.Context, bookingID string, req *OfferBookingRequest) (*OfferResponse, error) {
 	userCtx, err := h.authHelper.ExtractUserContext(ctx, "offer_booking")
@@ -47,89 +136,11 @@ func (h *BookingsHandler) OfferBooking(ctx context.Context, bookingID string, re
 		return nil, fmt.Errorf("artisan_id is required")
 	}
 
-	// Validate offer can be created
-	if err := h.offerValidator.ValidateOfferCreation(booking, req.ArtisanID); err != nil {
-		return nil, err
-	}
-
-	// Set default expiration (24 hours)
-	expiresIn := req.ExpiresIn
-	if expiresIn == 0 {
-		expiresIn = 24
-	}
-	if expiresIn > 72 {
-		return nil, fmt.Errorf("expires_in cannot exceed 72 hours")
-	}
-
-	// Create offer and update booking status in transaction
-	var offer *domain.BookingOffer
-
-	err = h.repo.WithTransaction(ctx, func(txRepo domain.BookingRepository) error {
-		// Create offer
-		offer = &domain.BookingOffer{
-			ID:        binternal.GenerateUUID(),
-			BookingID: bookingID,
-			ArtisanID: req.ArtisanID,
-			Status:    domain.OfferPending,
-			OfferedBy: userCtx.ID,
-			OfferedAt: time.Now(),
-			ExpiresAt: time.Now().Add(time.Duration(expiresIn) * time.Hour),
-			CreatedAt: time.Now(),
-			UpdatedAt: time.Now(),
-		}
-
-		if err := txRepo.CreateOffer(ctx, offer); err != nil {
-			return fmt.Errorf("failed to create offer: %w", err)
-		}
-
-		// Get fresh booking for status update
-		currentBooking, err := txRepo.GetByID(ctx, bookingID)
-		if err != nil {
-			return fmt.Errorf("failed to get booking: %w", err)
-		}
-
-		// Update booking status to OfferPending
-		currentBooking.Status = domain.BookingOfferPending
-		currentBooking.UpdatedAt = time.Now()
-		currentBooking.OffersCount++
-
-		if err := txRepo.Update(ctx, currentBooking); err != nil {
-			return fmt.Errorf("failed to update booking status: %w", err)
-		}
-
-		// Create event in outbox
-		event := &domain.BookingEvent{
-			BookingID:      bookingID,
-			Status:         domain.BookingOfferPending,
-			PreviousStatus: booking.Status,
-			Timestamp:      time.Now(),
-			UserID:         userCtx.ID,
-			ArtisanID:      &offer.ArtisanID,
-		}
-
-		if err := txRepo.CreateEventInOutbox(ctx, event); err != nil {
-			return fmt.Errorf("failed to create event: %w", err)
-		}
-
-		return nil
-	})
-
+	// Create the offer using the internal function
+	offer, err := h.CreateOfferInternal(ctx, bookingID, req.ArtisanID, userCtx.ID, req.ExpiresIn)
 	if err != nil {
-		h.logger.Error(ctx, "failed to create offer and update booking", err, map[string]any{
-			"booking_id": bookingID,
-			"artisan_id": req.ArtisanID,
-		})
 		return nil, err
 	}
-
-	// Clear cache
-	h.cache.Delete(ctx, binternal.BookingCacheKey(bookingID))
-
-	h.logger.Info(ctx, "booking offered to artisan", map[string]any{
-		"booking_id": bookingID,
-		"offer_id":   offer.ID,
-		"artisan_id": req.ArtisanID,
-	})
 
 	return h.toOfferResponse(offer), nil
 }
