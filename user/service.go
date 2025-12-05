@@ -181,13 +181,30 @@ func (s *Service) UpdateProfile(ctx context.Context, req *UpdateProfileRequest) 
 			}
 		}
 
-		// Upsert profile (create if doesn't exist, update if exists)
-		profile = &UserProfile{
-			UserID:    userIDStr,
-			FirstName: req.FirstName,
-			LastName:  req.LastName,
-			Phone:     req.Phone,
-			AvatarURL: req.AvatarURL,
+		// Get existing profile
+		profile, err := profileRepo.GetByUserID(ctx, userIDStr)
+		if err != nil {
+			// If profile does not exist, create a new one
+			if errors.Is(err, ErrProfileNotFound) {
+				profile = &UserProfile{UserID: userIDStr}
+			} else {
+				s.logger.LogError(ctx, "get_profile_for_update", err)
+				return errs.B().Msg("failed to get profile for update").Err()
+			}
+		}
+
+		// Apply updates from request
+		if req.FirstName != "" {
+			profile.FirstName = req.FirstName
+		}
+		if req.LastName != "" {
+			profile.LastName = req.LastName
+		}
+		if req.Phone != "" {
+			profile.Phone = req.Phone
+		}
+		if req.AvatarURL != "" {
+			profile.AvatarURL = req.AvatarURL
 		}
 
 		if err := profileRepo.Upsert(ctx, profile); err != nil {
