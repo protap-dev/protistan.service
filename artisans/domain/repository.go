@@ -16,6 +16,7 @@ var (
 type ArtisanRepository interface {
 	Create(ctx context.Context, profile *ArtisanProfile) error
 	GetByID(ctx context.Context, id string) (*ArtisanProfile, error)
+	GetByArtisanID(ctx context.Context, artisanID string) (*ArtisanProfile, error)
 	Update(ctx context.Context, id string, updates map[string]any) error
 	Delete(ctx context.Context, id string) error
 
@@ -38,6 +39,7 @@ type RatesRepository interface {
 	Delete(ctx context.Context, id string) error
 	GetServiceByID(ctx context.Context, serviceID string) (*Service, error)
 	GetCategoryByID(ctx context.Context, categoryID string) (*ServiceCategory, error)
+	GetAllCategories(ctx context.Context) ([]ServiceCategory, error)
 
 	// Add transaction support for atomic operations
 	WithTransaction(ctx context.Context, fn func(RatesRepository) error) error

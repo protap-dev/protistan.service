@@ -19,7 +19,7 @@ type ArtisanRateWithService struct {
 	ArtisanRate
 	ServiceName        string `json:"service_name"`
 	ServiceDescription string `json:"service_description"`
-	CategoryName       string `json:"category_name"`
+	CategoryID       string `json:"category_id"`
 }
 
 // ArtisanRatesResponse represents the response for getting artisan rates
@@ -57,7 +57,7 @@ type ServiceRate struct {
 	ServiceID          string  `json:"service_id"`
 	ServiceName        string  `json:"service_name"`
 	ServiceDescription string  `json:"service_description"`
-	CategoryName       string  `json:"category_name"`
+	CategoryID       string  `json:"category_id"`
 	HourlyRateCents    *int64  `json:"hourly_rate_cents,omitempty"`
 	MinimumChargeCents *int64  `json:"minimum_charge_cents,omitempty"`
 	Currency           string  `json:"currency"`

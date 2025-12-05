@@ -2,6 +2,7 @@ package handlers
 
 import (
 	"context"
+	"encoding/json"
 	"log"
 	"strings"
 	"time"
@@ -146,13 +147,20 @@ func (h *MessagesHandler) HandleWebSocketConnection(ctx context.Context, threadI
 		for i := len(recentMessages) - 1; i >= 0; i-- {
 			msg := recentMessages[i]
 			wsMsg := &WSMessage{
-				ID:       msg.ID,
-				ThreadID: msg.ThreadID,
-				SenderID: msg.SenderID,
-				Content:  msg.Content,
-				Status:   string(msg.Status),
-				SentAt:   *msg.SentAt,
+				ID:          msg.ID,
+				ThreadID:    msg.ThreadID,
+				SenderID:    msg.SenderID,
+				Content:     msg.Content,
+				Status:      string(msg.Status),
+				SentAt:      *msg.SentAt,
+				MessageType: string(msg.MessageType),
 			}
+
+			// Add metadata if it exists
+			if len(msg.Metadata) > 0 && string(msg.Metadata) != "null" {
+				wsMsg.Metadata = json.RawMessage(msg.Metadata)
+			}
+
 			client.send <- wsMsg
 		}
 	}

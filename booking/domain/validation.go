@@ -11,14 +11,16 @@ import (
 
 // CreateBookingRequest represents the request to create a booking (for validation)
 type CreateBookingRequest struct {
-	ServiceCategoryID     string            `json:"service_category_id"`
-	Title                 string            `json:"title"`
-	Description           string            `json:"description,omitempty"`
-	CustomerAddressID     string            `json:"customer_address_id"`
-	Priority              string            `json:"priority,omitempty"`
-	ScheduledAt           *time.Time        `json:"scheduled_at,omitempty"`
-	EstimatedDurationMins int               `json:"estimated_duration_mins,omitempty"`
-	Metadata              map[string]string `json:"metadata,omitempty"`
+	IdempotencyKey    *string           `json:"idempotency_key,omitempty"`
+	SpecificArtisanID string            `json:"specific_artisan_id,omitempty"`
+	ServiceCategoryID string            `json:"service_category_id"`
+	ServiceID         string            `json:"service_id"`
+	Description       string            `json:"description,omitempty"`
+	CustomerAddressID string            `json:"customer_address_id"`
+	ScheduledAt       *time.Time        `json:"scheduled_at,omitempty"`
+	MediaURLs         []string          `json:"media_urls"`
+	Metadata          map[string]string `json:"metadata,omitempty"`
+	IsFlexible        bool              `json:"is_flexible"`
 }
 
 // BookingValidator defines the interface for booking validation
@@ -37,22 +39,6 @@ func NewBookingValidator() BookingValidator {
 
 // ValidateCreateRequest validates a booking creation request
 func (v *bookingValidator) ValidateCreateRequest(req *CreateBookingRequest) error {
-	if req.Title == "" {
-		return errors.New("title is required")
-	}
-
-	if len(req.Title) < 5 {
-		return errors.New("title must be at least 5 characters")
-	}
-
-	if len(req.Title) > 100 {
-		return errors.New("title must be less than 100 characters")
-	}
-
-	if req.Description != "" && len(req.Description) > 500 {
-		return errors.New("description must be less than 500 characters")
-	}
-
 	if req.ServiceCategoryID == "" {
 		return errors.New("service category is required")
 	}
@@ -61,27 +47,20 @@ func (v *bookingValidator) ValidateCreateRequest(req *CreateBookingRequest) erro
 		return errors.New("customer address is required")
 	}
 
-	if req.EstimatedDurationMins < 0 {
-		return errors.New("estimated duration cannot be negative")
+	if req.Description == "" {
+		return errors.New("description is required to help the artisan understand the task")
 	}
 
-	if req.EstimatedDurationMins > 1440 { // 24 hours
-		return errors.New("estimated duration cannot exceed 24 hours")
+	if len(req.Description) < 10 {
+		return errors.New("description must be at least 10 characters")
 	}
 
-	// Validate priority if provided
-	if req.Priority != "" {
-		validPriorities := []string{"low", "normal", "high", "urgent"}
-		valid := false
-		for _, p := range validPriorities {
-			if req.Priority == p {
-				valid = true
-				break
-			}
-		}
-		if !valid {
-			return errors.New("priority must be one of: low, normal, high, urgent")
-		}
+	if len(req.Description) > 1000 { // Increased limit for detailed descriptions
+		return errors.New("description must be less than 1000 characters")
+	}
+
+	if req.ScheduledAt != nil && req.ScheduledAt.Before(time.Now()) {
+		return errors.New("scheduled time cannot be in the past")
 	}
 
 	return nil

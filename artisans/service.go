@@ -15,9 +15,10 @@ import (
 
 //encore:service
 type Service struct {
-	profileHandler *handlers.ProfileHandler
-	searchHandler  *handlers.SearchHandler
-	ratesHandler   *handlers.RatesHandler
+	profileHandler    *handlers.ProfileHandler
+	searchHandler     *handlers.SearchHandler
+	ratesHandler      *handlers.RatesHandler
+	categoriesHandler *handlers.CategoriesHandler
 }
 
 func initService() (*Service, error) {
@@ -48,10 +49,14 @@ func initService() (*Service, error) {
 	ratesService := domain.NewRatesService(artisanRepo, ratesRepo, logger)
 	ratesHandler := handlers.NewRatesHandler(ratesService, authHelper, logger)
 
+	// Initialize categories handler
+	categoriesHandler := handlers.NewCategoriesHandler(ratesRepo, logger)
+
 	return &Service{
-		profileHandler: profileHandler,
-		searchHandler:  searchHandler,
-		ratesHandler:   ratesHandler,
+		profileHandler:    profileHandler,
+		searchHandler:     searchHandler,
+		ratesHandler:      ratesHandler,
+		categoriesHandler: categoriesHandler,
 	}, nil
 }
 
@@ -79,10 +84,20 @@ func (s *Service) GetArtisanProfile(ctx context.Context, id string) (*domain.Pub
 
 //encore:api public method=GET path=/v0/artisans/rates/:id
 func (s *Service) GetArtisanRates(ctx context.Context, id string) (*handlers.GetArtisanRatesResponse, error) {
-	return s.ratesHandler.GetArtisanRates(ctx, id)
+	return s.ratesHandler.GetArtisanRatesByArtisanID(ctx, id)
 }
 
 //encore:api auth method=PUT path=/v0/artisans/rates
 func (s *Service) UpdateRates(ctx context.Context, req *handlers.UpdateArtisanRatesRequest) (*handlers.UpdateArtisanRatesResponse, error) {
 	return s.ratesHandler.UpdateRates(ctx, req)
+}
+
+//encore:api public method=GET path=/v0/artisans/categories
+func (s *Service) GetServiceCategories(ctx context.Context) (*handlers.CategoriesResponse, error) {
+	return s.categoriesHandler.GetAllCategories(ctx)
+}
+
+//encore:api public method=POST path=/v0/artisans/search
+func (s *Service) SearchArtisans(ctx context.Context, req *handlers.SearchArtisansRequest) (*handlers.SearchArtisansResponse, error) {
+	return s.searchHandler.Search(ctx, req)
 }

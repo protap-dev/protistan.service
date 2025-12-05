@@ -6,13 +6,37 @@ import (
 	"strconv"
 	"strings"
 	"time"
+
+	bookingdomain "encore.app/booking/domain"
 )
+
+// buildStandardMetadata creates a base metadata map with common fields
+func buildStandardMetadata(event *bookingdomain.BookingEvent) map[string]interface{} {
+	metadata := map[string]interface{}{
+		"booking_id": event.BookingID,
+	}
+
+	// Add artisan_id if available
+	if event.ArtisanID != nil && *event.ArtisanID != "" {
+		metadata["artisan_id"] = *event.ArtisanID
+	}
+
+	// Add customer_id if available in event metadata
+	if event.Metadata != nil {
+		if customerID, ok := event.Metadata["customer_id"]; ok && customerID != "" {
+			metadata["customer_id"] = customerID
+		}
+	}
+
+	return metadata
+}
 
 // AutomatedMessageTemplate defines templates for system messages
 type AutomatedMessageTemplate struct {
-	EventType   string
-	MessageType MessageType
-	ContentFunc func(data map[string]interface{}) string
+	EventType    string
+	MessageType  MessageType
+	ContentFunc  func(data map[string]interface{}) string
+	MetadataFunc func(event *bookingdomain.BookingEvent) map[string]interface{}
 }
 
 // AutomatedMessages registry - system messages for the chat room
@@ -22,10 +46,9 @@ var AutomatedMessages = map[string]AutomatedMessageTemplate{
 		EventType:   "booking.assigned",
 		MessageType: MessageTypeStatusUpdate,
 		ContentFunc: func(data map[string]interface{}) string {
-			artisanName := safeString(data, "artisan_name", "The artisan")
-			serviceType := safeString(data, "service_type", "service")
-			return fmt.Sprintf("%s has been assigned to this %s booking.", artisanName, serviceType)
+			return "An artisan has been assigned to this booking."
 		},
+		MetadataFunc: buildStandardMetadata,
 	},
 
 	// 2. Quote Proposed

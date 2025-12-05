@@ -150,27 +150,31 @@ func (s *SearchService) executeSearchQuery(ctx context.Context, input *SearchInp
 
 	// Build base query with joins
 	query := db.WithContext(ctx).
-		Table("artisans a").
-		Select(`
-			a.*,
-			u.email, u.user_type, u.email_verified, u.profile_complete, u.created_at as user_created_at, u.updated_at as user_updated_at,
-			up.first_name, up.last_name, up.phone, up.avatar_url as user_avatar_url,
-			ts_rank(a.search_vector, query) as rank
-		`).
-		Joins("JOIN users u ON a.user_id = u.id").
-		Joins("LEFT JOIN user_profiles up ON u.id = up.user_id")
+		Table("artisans a")
+
+	selectFields := `
+		a.*,
+		u.email, u.user_type, u.email_verified, u.profile_complete, u.created_at as user_created_at, u.updated_at as user_updated_at,
+		up.first_name, up.last_name, up.phone, up.avatar_url as user_avatar_url
+	`
 
 	// Apply full-text search if query provided
-	if input.Query != nil && *input.Query != "" {
+	if input.Query != nil && strings.TrimSpace(*input.Query) != "" {
 		searchTerm := strings.TrimSpace(*input.Query)
+		query = query.Select(selectFields+", ts_rank(a.search_vector, plainto_tsquery('english', ?)) as rank", searchTerm)
 		query = query.Where("a.search_vector @@ plainto_tsquery('english', ?)", searchTerm)
 		query = query.Order("rank DESC")
+	} else {
+		query = query.Select(selectFields + ", 0 as rank")
 	}
+
+	query = query.Joins("JOIN users u ON a.user_id = u.id").
+		Joins("LEFT JOIN user_profiles up ON u.id = up.user_id")
 
 	// Apply category filter
 	if input.CategoryIDs != nil && len(*input.CategoryIDs) > 0 {
 		categoryList := *input.CategoryIDs
-		query = query.Where("a.category_ids && ARRAY[?]", categoryList)
+		query = query.Where("a.category_ids && ?", gorm.Expr("ARRAY[?]::uuid[]", categoryList))
 	}
 
 	// Apply location filter (simple text matching for now)
@@ -190,10 +194,17 @@ func (s *SearchService) executeSearchQuery(ctx context.Context, input *SearchInp
 		query = query.Where("a.reviews_count >= ?", *input.MinReviews)
 	}
 
-	// Apply language filter
+	// Apply language filter, ignoring empty strings
 	if input.Languages != nil && len(*input.Languages) > 0 {
-		langList := *input.Languages
-		query = query.Where("a.languages && ARRAY[?]", langList)
+		var validLangs []string
+		for _, lang := range *input.Languages {
+			if strings.TrimSpace(lang) != "" {
+				validLangs = append(validLangs, lang)
+			}
+		}
+		if len(validLangs) > 0 {
+			query = query.Where("a.languages && ARRAY[?]", validLangs)
+		}
 	}
 
 	// Get total count

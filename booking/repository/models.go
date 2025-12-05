@@ -10,24 +10,26 @@ import (
 
 // bookingDBModel represents the database model for bookings
 type bookingDBModel struct {
-	ID                    string         `gorm:"column:id;primaryKey;default:generate_uuid()"`
-	CustomerID            string         `gorm:"column:customer_id;not null"`
-	ArtisanID             *string        `gorm:"column:artisan_id"`
-	ServiceCategoryID     string         `gorm:"column:service_category_id;not null"`
-	Title                 string         `gorm:"column:title;not null"`
-	Description           string         `gorm:"column:description"`
-	CustomerAddressID     string         `gorm:"column:customer_address_id;not null"`
-	Status                string         `gorm:"column:status;not null"`
-	Priority              string         `gorm:"column:priority"`
-	ScheduledAt           *time.Time     `gorm:"column:scheduled_at"`
-	EstimatedDurationMins int            `gorm:"column:estimated_duration_mins"`
-	Metadata              datatypes.JSON `gorm:"column:metadata;type:jsonb"`
-	IsSpecificArtisan     bool           `gorm:"column:is_specific_artisan;default:false"`
-	OffersCount           int            `gorm:"column:offers_count;default:0"`
-	CreatedAt             time.Time      `gorm:"column:created_at;not null"`
-	UpdatedAt             time.Time      `gorm:"column:updated_at;not null"`
-	Version               int64          `gorm:"column:version;default:1"`
-	DeletedAt             *time.Time     `gorm:"column:deleted_at"`
+	ID                string         `gorm:"column:id;primaryKey;default:generate_uuid()"`
+	CustomerID        string         `gorm:"column:customer_id;not null"`
+	ArtisanID         *string        `gorm:"column:artisan_id"`
+	ServiceCategoryID string         `gorm:"column:service_category_id;not null"`
+	ServiceID         string         `gorm:"column:service_id"`
+	Title             string         `gorm:"column:title;not null"`
+	Description       string         `gorm:"column:description"`
+	CustomerAddressID string         `gorm:"column:customer_address_id;not null"`
+	Status            string         `gorm:"column:status;not null"`
+	Priority          string         `gorm:"column:priority"`
+	ScheduledAt       *time.Time     `gorm:"column:scheduled_at"`
+	Metadata          datatypes.JSON `gorm:"column:metadata;type:jsonb"`
+	IsSpecificArtisan bool           `gorm:"column:is_specific_artisan;default:false"`
+	OffersCount       int            `gorm:"column:offers_count;default:0"`
+	CreatedAt         time.Time      `gorm:"column:created_at;not null"`
+	UpdatedAt         time.Time      `gorm:"column:updated_at;not null"`
+	Version           int64          `gorm:"column:version;default:1"`
+	DeletedAt         *time.Time     `gorm:"column:deleted_at"`
+	MediaURLs         []string       `gorm:"type:text[]" json:"media_urls"`
+	IsFlexible        bool           `json:"is_flexible"`
 }
 
 func (bookingDBModel) TableName() string {
@@ -80,24 +82,31 @@ func toDBModel(domainBooking *domain.Booking) *bookingDBModel {
 		metadataJSON = []byte("{}")
 	}
 
+	mediaURLs := domainBooking.MediaURLs
+	if len(mediaURLs) == 1 && mediaURLs[0] == "" {
+		mediaURLs = []string{} // Use an empty slice instead of a slice with an empty string
+	}
+
 	return &bookingDBModel{
-		ID:                    domainBooking.ID,
-		CustomerID:            domainBooking.CustomerID,
-		ArtisanID:             domainBooking.ArtisanID,
-		ServiceCategoryID:     domainBooking.ServiceCategoryID,
-		Title:                 domainBooking.Title,
-		Description:           domainBooking.Description,
-		CustomerAddressID:     domainBooking.CustomerAddressID,
-		Status:                string(domainBooking.Status),
-		Priority:              domainBooking.Priority,
-		ScheduledAt:           domainBooking.ScheduledAt,
-		EstimatedDurationMins: domainBooking.EstimatedDurationMins,
-		Metadata:              datatypes.JSON(metadataJSON),
-		IsSpecificArtisan:     domainBooking.IsSpecificArtisan,
-		OffersCount:           domainBooking.OffersCount,
-		CreatedAt:             domainBooking.CreatedAt,
-		UpdatedAt:             domainBooking.UpdatedAt,
-		Version:               domainBooking.Version,
+		ID:                domainBooking.ID,
+		CustomerID:        domainBooking.CustomerID,
+		ArtisanID:         domainBooking.ArtisanID,
+		ServiceCategoryID: domainBooking.ServiceCategoryID,
+		ServiceID:         domainBooking.ServiceID,
+		Title:             domainBooking.Title,
+		Description:       domainBooking.Description,
+		CustomerAddressID: domainBooking.CustomerAddressID,
+		Status:            string(domainBooking.Status),
+		Priority:          domainBooking.Priority,
+		ScheduledAt:       domainBooking.ScheduledAt,
+		Metadata:          datatypes.JSON(metadataJSON),
+		IsSpecificArtisan: domainBooking.IsSpecificArtisan,
+		OffersCount:       domainBooking.OffersCount,
+		CreatedAt:         domainBooking.CreatedAt,
+		UpdatedAt:         domainBooking.UpdatedAt,
+		Version:           domainBooking.Version,
+		MediaURLs:         mediaURLs,
+		IsFlexible:        domainBooking.IsFlexible,
 	}
 }
 
@@ -116,23 +125,23 @@ func toDomainModel(dbBooking *bookingDBModel) *domain.Booking {
 	}
 
 	return &domain.Booking{
-		ID:                    dbBooking.ID,
-		CustomerID:            dbBooking.CustomerID,
-		ArtisanID:             dbBooking.ArtisanID,
-		ServiceCategoryID:     dbBooking.ServiceCategoryID,
-		Title:                 dbBooking.Title,
-		Description:           dbBooking.Description,
-		CustomerAddressID:     dbBooking.CustomerAddressID,
-		Status:                domain.BookingStatus(dbBooking.Status),
-		Priority:              dbBooking.Priority,
-		ScheduledAt:           dbBooking.ScheduledAt,
-		EstimatedDurationMins: dbBooking.EstimatedDurationMins,
-		Metadata:              metadata,
-		IsSpecificArtisan:     dbBooking.IsSpecificArtisan,
-		OffersCount:           dbBooking.OffersCount,
-		CreatedAt:             dbBooking.CreatedAt,
-		UpdatedAt:             dbBooking.UpdatedAt,
-		Version:               dbBooking.Version,
+		ID:                dbBooking.ID,
+		CustomerID:        dbBooking.CustomerID,
+		ArtisanID:         dbBooking.ArtisanID,
+		ServiceCategoryID: dbBooking.ServiceCategoryID,
+		ServiceID:         dbBooking.ServiceID,
+		Title:             dbBooking.Title,
+		Description:       dbBooking.Description,
+		CustomerAddressID: dbBooking.CustomerAddressID,
+		Status:            domain.BookingStatus(dbBooking.Status),
+		Priority:          dbBooking.Priority,
+		ScheduledAt:       dbBooking.ScheduledAt,
+		Metadata:          metadata,
+		IsSpecificArtisan: dbBooking.IsSpecificArtisan,
+		OffersCount:       dbBooking.OffersCount,
+		CreatedAt:         dbBooking.CreatedAt,
+		UpdatedAt:         dbBooking.UpdatedAt,
+		Version:           dbBooking.Version,
 	}
 }
 
@@ -168,4 +177,21 @@ func offerToDomainModel(dbOffer *offerDBModel) *domain.BookingOffer {
 		CreatedAt:    dbOffer.CreatedAt,
 		UpdatedAt:    dbOffer.UpdatedAt,
 	}
+}
+
+// IdempotencyRecord represents the idempotency key storage
+type IdempotencyRecord struct {
+	IdempotencyKey string     `gorm:"primaryKey;column:idempotency_key;type:varchar(255)"`
+	UserID         string     `gorm:"column:user_id;type:uuid;not null;index"`
+	RequestHash    string     `gorm:"column:request_hash;type:text;not null"`
+	BookingID      *string    `gorm:"column:booking_id;type:uuid"`
+	ResponseBody   []byte     `gorm:"column:response_body;type:jsonb"`
+	Status         string     `gorm:"column:status;type:varchar(20);not null;default:'processing'"`
+	CreatedAt      time.Time  `gorm:"column:created_at;not null;default:now()"`
+	CompletedAt    *time.Time `gorm:"column:completed_at"`
+	ExpiresAt      time.Time  `gorm:"column:expires_at;not null;index"`
+}
+
+func (IdempotencyRecord) TableName() string {
+	return "idempotency_keys"
 }

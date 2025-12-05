@@ -3,6 +3,7 @@ package customers
 import (
 	"context"
 	"fmt"
+	"strings"
 	"time"
 
 	"encore.app/core"
@@ -81,7 +82,7 @@ type AddAddressRequest struct {
 	City          string  `json:"city"`
 	State         string  `json:"state"`
 	PostalCode    string  `json:"postal_code"`
-	Country       string  `json:"country"`
+	Country       *string `json:"country"` // Changed to pointer to allow nil for default
 	Longitude     float64 `json:"longitude"`
 	Latitude      float64 `json:"latitude"`
 	IsDefault     bool    `json:"is_default"`
@@ -166,6 +167,9 @@ func (s *Service) AddAddress(ctx context.Context, req *AddAddressRequest) (*Cust
 	userIDStr := string(userID)
 	s.logger.LogUserAction(ctx, "add_address", userIDStr)
 
+	// Normalize label to lowercase before validation and storage
+	req.Label = strings.ToLower(req.Label)
+
 	// Validation
 	if err := s.validator.ValidateAddress(req); err != nil {
 		s.logger.LogError(ctx, "validate_address", err)
@@ -193,13 +197,28 @@ func (s *Service) AddAddress(ctx context.Context, req *AddAddressRequest) (*Cust
 			City:          req.City,
 			State:         req.State,
 			PostalCode:    req.PostalCode,
-			Country:       req.Country,
 			Coordinates:   formatPoint(req.Longitude, req.Latitude),
 			IsDefault:     req.IsDefault,
 		}
 
-		if err := repo.Create(ctx, address); err != nil {
-			s.logger.LogError(ctx, "create_address", err)
+		// Access the underlying transactional DB from the repository
+		dbRepo, ok := repo.(*addressRepository)
+		if !ok {
+			return fmt.Errorf("internal error: failed to cast repository to concrete type")
+		}
+		txDB := dbRepo.db // Get the transactional *gorm.DB instance
+
+		var createOperation *gorm.DB
+		if req.Country != nil {
+			address.Country = *req.Country // Assign the provided country
+			createOperation = txDB.Create(address)
+		} else {
+			// If country is not provided, omit it from the insert to use DB default
+			createOperation = txDB.Omit("country").Create(address)
+		}
+
+		if createOperation.Error != nil {
+			s.logger.LogError(ctx, "create_address", createOperation.Error)
 			return ErrDatabaseError
 		}
 
@@ -249,7 +268,8 @@ func (s *Service) UpdateAddress(ctx context.Context, addressID string, req *Upda
 		// Build updates
 		updates := make(map[string]any)
 		if req.Label != nil {
-			updates["label"] = *req.Label
+			lowerCaseLabel := strings.ToLower(*req.Label)
+			updates["label"] = lowerCaseLabel
 		}
 		if req.StreetAddress != nil {
 			updates["street_address"] = *req.StreetAddress

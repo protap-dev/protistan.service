@@ -4,8 +4,8 @@ import (
 	"context"
 	"time"
 
-	"gorm.io/gorm"
 	"encore.app/artisans/domain"
+	"gorm.io/gorm"
 )
 
 // ratesRepository implements domain.RatesRepository
@@ -117,4 +117,19 @@ func (r *ratesRepository) GetCategoryByID(ctx context.Context, categoryID string
 	}
 
 	return &category, nil
+}
+
+// GetAllCategories retrieves all service categories
+func (r *ratesRepository) GetAllCategories(ctx context.Context) ([]domain.ServiceCategory, error) {
+	var categories []domain.ServiceCategory
+	err := r.db.WithContext(ctx).
+		Table("service_categories").
+		Order("name ASC").
+		Find(&categories).Error
+
+	if err != nil {
+		return nil, err
+	}
+
+	return categories, nil
 }

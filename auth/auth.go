@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"strings"
+	"time"
 
 	"encore.app/core"
 	"encore.app/core/db"
@@ -126,7 +127,12 @@ func (s *Service) Register(ctx context.Context, req *RegisterRequest) (*AuthResp
 		return nil, errs.B().Msg("failed to generate token").Err()
 	}
 
-	return &AuthResponse{Token: token}, nil
+	refreshToken, err := s.createRefreshToken(newUser.ID) // or user.ID for login
+	if err != nil {
+		return nil, errs.B().Msg("failed to generate refresh token").Err()
+	}
+
+	return &AuthResponse{Token: token, RefreshToken: refreshToken}, nil
 }
 
 //encore:api public method=POST path=/v0/auth/login
@@ -166,5 +172,38 @@ func (s *Service) Login(ctx context.Context, req *LoginRequest) (*AuthResponse, 
 		return nil, errs.B().Msg("failed to generate token").Err()
 	}
 
-	return &AuthResponse{Token: token}, nil
+	refreshToken, err := s.createRefreshToken(user.ID) // or user.ID for login
+	if err != nil {
+		return nil, errs.B().Msg("failed to generate refresh token").Err()
+	}
+
+	return &AuthResponse{Token: token, RefreshToken: refreshToken}, nil
+}
+
+//encore:api public method=POST path=/v0/auth/refresh
+func (s *Service) Refresh(ctx context.Context, req *RefreshRequest) (*AuthResponse, error) {
+	if req == nil || req.RefreshToken == "" {
+		return nil, errs.B().Msg("invalid request").Err()
+	}
+
+	var refreshToken RefreshToken
+	if err := s.db.Where("token = ? AND expires_at > ?", req.RefreshToken, time.Now()).First(&refreshToken).Error; err != nil {
+		return nil, errs.B().Msg("invalid or expired refresh token").Err()
+	}
+
+	var user User
+	if err := s.db.Where("id = ?", refreshToken.UserID).First(&user).Error; err != nil {
+		return nil, errs.B().Msg("user not found").Err()
+	}
+
+	// Generate new access token
+	newAccessToken, err := s.generateJWT(user.ID, user.Email, user.UserType, user.ProfileComplete)
+	if err != nil {
+		return nil, errs.B().Msg("failed to generate token").Err()
+	}
+
+	return &AuthResponse{
+		Token:        newAccessToken,
+		RefreshToken: req.RefreshToken, // Reuse same refresh token
+	}, nil
 }

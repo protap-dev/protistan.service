@@ -153,7 +153,7 @@ func (s *Service) ListBookingOffers(ctx context.Context, id string) (*handlers.L
 }
 
 //encore:api auth method=GET path=/v0/artisan/offers
-func (s *Service) ListArtisanOffers(ctx context.Context, params *handlers.ListOffersParams) (*handlers.ListOffersResponse, error) {
+func (s *Service) ListArtisanOffers(ctx context.Context, params *handlers.ListOffersParams) (*handlers.ListArtisanOffersResponse, error) {
 	return s.bookingsHandler.ListArtisanOffers(ctx, params)
 }
 

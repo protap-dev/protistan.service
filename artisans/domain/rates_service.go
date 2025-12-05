@@ -25,10 +25,10 @@ func NewRatesService(artisanRepo ArtisanRepository, ratesRepo RatesRepository, l
 	}
 }
 
-// GetArtisanRates retrieves all rates for a specific artisan (public endpoint)
-func (s *RatesService) GetArtisanRates(ctx context.Context, artisanID string) (*ArtisanRatesResponse, error) {
+// GetArtisanRatesByArtisanID retrieves all rates for a specific artisan by artisan ID (public endpoint)
+func (s *RatesService) GetArtisanRatesByArtisanID(ctx context.Context, artisanID string) (*ArtisanRatesResponse, error) {
 	// Verify artisan exists
-	_, err := s.artisanRepo.GetByID(ctx, artisanID)
+	_, err := s.artisanRepo.GetByArtisanID(ctx, artisanID)
 	if err != nil {
 		s.logger.LogError(ctx, "get_artisan_rates_verify_artisan", err)
 		return nil, err
@@ -64,7 +64,7 @@ func (s *RatesService) GetArtisanRates(ctx context.Context, artisanID string) (*
 			ArtisanRate:        rate,
 			ServiceName:        service.Name,
 			ServiceDescription: service.Description,
-			CategoryName:       category.Name,
+			CategoryID:         category.ID,
 		}
 
 		// Use the first rate's currency as default
@@ -199,7 +199,7 @@ func (s *RatesService) UpdateArtisanRates(ctx context.Context, userCtx *internal
 				ArtisanRate:        rate,
 				ServiceName:        service.Name,
 				ServiceDescription: service.Description,
-				CategoryName:       category.Name,
+				CategoryID:         category.ID,
 			}
 
 			// Use the first rate's currency as default

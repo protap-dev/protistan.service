@@ -121,6 +121,11 @@ func createAuthContext(userID string) context.Context {
 	return ctx
 }
 
+// StringPtr returns a pointer to the given string.
+func StringPtr(s string) *string {
+	return &s
+}
+
 // ============================================================================
 // TEST: AddAddress (Isolated Unit Tests)
 // ============================================================================
@@ -137,7 +142,7 @@ func Test_AddAddress_UnitTests(t *testing.T) {
 			City:          "Lagos",
 			State:         "Lagos State",
 			PostalCode:    "100001",
-			Country:       "Nigeria",
+			Country:       StringPtr("Nigeria"),
 			Longitude:     3.3792,
 			Latitude:      6.5244,
 			IsDefault:     true,
@@ -175,9 +180,12 @@ func Test_AddAddress_UnitTests(t *testing.T) {
 			City:          req.City,
 			State:         req.State,
 			PostalCode:    req.PostalCode,
-			Country:       req.Country,
+			Country:       "", // Initialize with zero value
 			Coordinates:   formatPoint(req.Longitude, req.Latitude),
 			IsDefault:     req.IsDefault,
+		}
+		if req.Country != nil {
+			address.Country = *req.Country
 		}
 
 		err = mockRepo.Create(ctx, address)

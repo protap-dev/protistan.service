@@ -151,6 +151,103 @@ func (r *bookingRepository) UpdateOffer(ctx context.Context, offer *domain.Booki
 	return nil
 }
 
+// GetArtisanOffersWithDetails retrieves offers with associated booking and customer details
+func (r *bookingRepository) GetArtisanOffersWithDetails(ctx context.Context, artisanID string, status domain.BookingOfferStatus) ([]*domain.ArtisanOfferDetails, error) {
+	// 1. Get Offers
+	offers, err := r.GetOffersByArtisanID(ctx, artisanID, status)
+	if err != nil {
+		return nil, err
+	}
+	if len(offers) == 0 {
+		return []*domain.ArtisanOfferDetails{}, nil
+	}
+
+	// 2. Get Bookings
+	bookingIDs := make([]string, len(offers))
+	for i, offer := range offers {
+		bookingIDs[i] = offer.BookingID
+	}
+
+	var bookings []bookingDBModel
+	if err := r.db.WithContext(ctx).Where("id IN ?", bookingIDs).Find(&bookings).Error; err != nil {
+		return nil, err
+	}
+
+	bookingMap := make(map[string]*domain.Booking)
+	customerIDs := make([]string, 0, len(bookings))
+	addressIDs := make([]string, 0, len(bookings))
+
+	for i := range bookings {
+		b := toDomainModel(&bookings[i])
+		bookingMap[b.ID] = b
+		customerIDs = append(customerIDs, b.CustomerID)
+		addressIDs = append(addressIDs, b.CustomerAddressID)
+	}
+
+	// 3. Get Customer Profiles (from coreDB)
+	type UserProfile struct {
+		UserID    string
+		FirstName string
+	}
+	var profiles []UserProfile
+	if len(customerIDs) > 0 {
+		if err := r.coreDB.WithContext(ctx).Table("user_profiles").
+			Select("user_id, first_name").
+			Where("user_id IN ?", customerIDs).
+			Scan(&profiles).Error; err != nil {
+			return nil, err
+		}
+	}
+
+	profileMap := make(map[string]string) // UserID -> FirstName
+	for _, p := range profiles {
+		profileMap[p.UserID] = p.FirstName
+	}
+
+	// 4. Get Customer Addresses (from coreDB)
+	type CustomerAddress struct {
+		ID    string
+		City  string
+		State string
+	}
+	var addresses []CustomerAddress
+	if len(addressIDs) > 0 {
+		if err := r.coreDB.WithContext(ctx).Table("customer_addresses").
+			Select("id, city, state").
+			Where("id IN ?", addressIDs).
+			Scan(&addresses).Error; err != nil {
+			return nil, err
+		}
+	}
+
+	addressMap := make(map[string]CustomerAddress) // ID -> Address
+	for _, a := range addresses {
+		addressMap[a.ID] = a
+	}
+
+	// 5. Assemble Result
+	result := make([]*domain.ArtisanOfferDetails, 0, len(offers))
+	for _, offer := range offers {
+		booking, ok := bookingMap[offer.BookingID]
+		if !ok {
+			continue
+		}
+
+		firstName := profileMap[booking.CustomerID]
+		address := addressMap[booking.CustomerAddressID]
+
+		result = append(result, &domain.ArtisanOfferDetails{
+			Offer:             offer,
+			Booking:           booking,
+			CustomerFirstName: firstName,
+			CustomerCity:      address.City,
+			CustomerState:     address.State,
+		})
+	}
+
+	return result, nil
+}
+
 // CreateOfferExpiredEventInOutbox writes offer expired event to outbox
 func (r *bookingRepository) CreateOfferExpiredEventInOutbox(ctx context.Context, event *domain.BookingEvent) error {
 	return insertEventInOutbox(r.coreDB, ctx, event, "booking.v1.offer.expired")

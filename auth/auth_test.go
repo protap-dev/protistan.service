@@ -203,14 +203,14 @@ func Test_generateJWT(t *testing.T) {
 		assert.True(t, claims.ExpiresAt.Time.After(time.Now()))
 	})
 
-	t.Run("token expires after 24 hours", func(t *testing.T) {
+	t.Run("token expires after 30 minutes", func(t *testing.T) {
 		token, err := svc.generateJWT("user-id", "test@example.com", "customer", false)
 		require.NoError(t, err)
 
 		claims, err := parseJWT(token)
 		require.NoError(t, err)
 
-		expectedExpiry := time.Now().Add(24 * time.Hour)
+		expectedExpiry := time.Now().Add(30 * time.Minute)
 		assert.InDelta(t, expectedExpiry.Unix(), claims.ExpiresAt.Unix(), 2)
 	})
 }
@@ -311,15 +311,23 @@ func Test_Register(t *testing.T) {
 
 		mock.ExpectBegin()
 		mock.ExpectQuery(regexp.QuoteMeta(`INSERT INTO "users"`)).
-			WithArgs(email, sqlmock.AnyArg(), false, "customer", false, sqlmock.AnyArg(), sqlmock.AnyArg()).
+			WithArgs(email, sqlmock.AnyArg(), false, "customer", true, sqlmock.AnyArg(), sqlmock.AnyArg()).
 			WillReturnRows(sqlmock.NewRows([]string{"id"}).AddRow("new-user-id"))
 		mock.ExpectCommit()
 
-		req := &RegisterRequest{Email: email, Password: password}
+		// Mock refresh token creation using GORM Create with RETURNING
+		mock.ExpectBegin()
+		mock.ExpectQuery(regexp.QuoteMeta(`INSERT INTO "refresh_tokens"`)).
+			WithArgs("new-user-id", sqlmock.AnyArg(), sqlmock.AnyArg(), sqlmock.AnyArg()).
+			WillReturnRows(sqlmock.NewRows([]string{"id"}).AddRow("refresh-token-id"))
+		mock.ExpectCommit()
+
+		req := &RegisterRequest{Email: email, Password: password, UserType: "customer"}
 		resp, err := svc.Register(ctx, req)
 
 		require.NoError(t, err)
 		assert.NotEmpty(t, resp.Token)
+		assert.NotEmpty(t, resp.RefreshToken)
 		assert.NoError(t, mock.ExpectationsWereMet())
 	})
 
@@ -334,7 +342,7 @@ func Test_Register(t *testing.T) {
 			WillReturnRows(sqlmock.NewRows([]string{"id", "email"}).
 				AddRow("existing-id", email))
 
-		req := &RegisterRequest{Email: email, Password: "SecureP!ss123"}
+		req := &RegisterRequest{Email: email, Password: "SecureP!ss123", UserType: "customer"}
 		_, err := svc.Register(ctx, req)
 
 		assert.Error(t, err)
@@ -346,7 +354,7 @@ func Test_Register(t *testing.T) {
 		svc, _, cleanup := setupTestService(t)
 		defer cleanup()
 
-		req := &RegisterRequest{Email: "invalid-email", Password: "SecureP!ss123"}
+		req := &RegisterRequest{Email: "invalid-email", Password: "SecureP!ss123", UserType: "customer"}
 		_, err := svc.Register(ctx, req)
 
 		assert.Error(t, err)
@@ -361,7 +369,7 @@ func Test_Register(t *testing.T) {
 			WithArgs("user@example.com", 1).
 			WillReturnError(gorm.ErrRecordNotFound)
 
-		req := &RegisterRequest{Email: "user@example.com", Password: "weak"}
+		req := &RegisterRequest{Email: "user@example.com", Password: "weak", UserType: "customer"}
 		_, err := svc.Register(ctx, req)
 
 		assert.Error(t, err)
@@ -384,7 +392,7 @@ func Test_Register(t *testing.T) {
 
 		for _, tt := range tests {
 			t.Run(tt.name, func(t *testing.T) {
-				req := &RegisterRequest{Email: tt.email, Password: tt.pass}
+				req := &RegisterRequest{Email: tt.email, Password: tt.pass, UserType: "customer"}
 				_, err := svc.Register(ctx, req)
 				assert.Error(t, err)
 			})
@@ -412,11 +420,18 @@ func Test_Register(t *testing.T) {
 
 		mock.ExpectBegin()
 		mock.ExpectQuery(regexp.QuoteMeta(`INSERT INTO "users"`)).
-			WithArgs(normalized, sqlmock.AnyArg(), false, "customer", false, sqlmock.AnyArg(), sqlmock.AnyArg()).
+			WithArgs(normalized, sqlmock.AnyArg(), false, "customer", true, sqlmock.AnyArg(), sqlmock.AnyArg()).
 			WillReturnRows(sqlmock.NewRows([]string{"id"}).AddRow("user-id"))
 		mock.ExpectCommit()
 
-		req := &RegisterRequest{Email: email, Password: "SecureP!ss123"}
+		// Mock refresh token creation using GORM Create with RETURNING
+		mock.ExpectBegin()
+		mock.ExpectQuery(regexp.QuoteMeta(`INSERT INTO "refresh_tokens"`)).
+			WithArgs("user-id", sqlmock.AnyArg(), sqlmock.AnyArg(), sqlmock.AnyArg()).
+			WillReturnRows(sqlmock.NewRows([]string{"id"}).AddRow("refresh-token-id"))
+		mock.ExpectCommit()
+
+		req := &RegisterRequest{Email: email, Password: "SecureP!ss123", UserType: "customer"}
 		_, err := svc.Register(ctx, req)
 
 		require.NoError(t, err)
@@ -431,7 +446,7 @@ func Test_Register(t *testing.T) {
 			WithArgs("user@example.com", 1).
 			WillReturnError(errors.New("database connection error"))
 
-		req := &RegisterRequest{Email: "user@example.com", Password: "SecureP!ss123"}
+		req := &RegisterRequest{Email: "user@example.com", Password: "SecureP!ss123", UserType: "customer"}
 		_, err := svc.Register(ctx, req)
 
 		assert.Error(t, err)
@@ -451,7 +466,7 @@ func Test_Register(t *testing.T) {
 			WillReturnError(errors.New("insert failed"))
 		mock.ExpectRollback()
 
-		req := &RegisterRequest{Email: "user@example.com", Password: "SecureP!ss123"}
+		req := &RegisterRequest{Email: "user@example.com", Password: "SecureP!ss123", UserType: "customer"}
 		_, err := svc.Register(ctx, req)
 
 		assert.Error(t, err)
@@ -463,7 +478,7 @@ func Test_Register(t *testing.T) {
 		defer cleanup()
 
 		email := "ratelimit@example.com"
-		req := &RegisterRequest{Email: email, Password: "SecureP!ss123"}
+		req := &RegisterRequest{Email: email, Password: "SecureP!ss123", UserType: "customer"}
 
 		for i := 0; i < 3; i++ {
 			svc.rateLimiter.isAllowed("register:"+email, 3) // ✅ Fixed: use isAllowed method
@@ -492,11 +507,19 @@ func Test_Login(t *testing.T) {
 			WillReturnRows(sqlmock.NewRows([]string{"id", "email", "password_hash"}).
 				AddRow("user-123", email, string(hashedPassword)))
 
+		// Mock refresh token creation using GORM Create with RETURNING
+		mock.ExpectBegin()
+		mock.ExpectQuery(regexp.QuoteMeta(`INSERT INTO "refresh_tokens"`)).
+			WithArgs("user-123", sqlmock.AnyArg(), sqlmock.AnyArg(), sqlmock.AnyArg()).
+			WillReturnRows(sqlmock.NewRows([]string{"id"}).AddRow("refresh-token-id"))
+		mock.ExpectCommit()
+
 		req := &LoginRequest{Email: email, Password: password}
 		resp, err := svc.Login(ctx, req)
 
 		require.NoError(t, err)
 		assert.NotEmpty(t, resp.Token)
+		assert.NotEmpty(t, resp.RefreshToken)
 		assert.NoError(t, mock.ExpectationsWereMet())
 	})
 
@@ -621,6 +644,13 @@ func Test_Login(t *testing.T) {
 			WithArgs(normalized, 1).
 			WillReturnRows(sqlmock.NewRows([]string{"id", "email", "password_hash"}).
 				AddRow("user-123", normalized, string(hashedPassword)))
+
+		// Mock refresh token creation using GORM Create with RETURNING
+		mock.ExpectBegin()
+		mock.ExpectQuery(regexp.QuoteMeta(`INSERT INTO "refresh_tokens"`)).
+			WithArgs("user-123", sqlmock.AnyArg(), sqlmock.AnyArg(), sqlmock.AnyArg()).
+			WillReturnRows(sqlmock.NewRows([]string{"id"}).AddRow("refresh-token-id"))
+		mock.ExpectCommit()
 
 		req := &LoginRequest{Email: email, Password: password}
 		_, err := svc.Login(ctx, req)
@@ -1340,7 +1370,7 @@ func Test_JWTPayloadTampering(t *testing.T) {
 			UserID: "user-123",
 			Email:  "user@example.com",
 			RegisteredClaims: jwt.RegisteredClaims{
-				ExpiresAt: jwt.NewNumericDate(time.Now().Add(24 * time.Hour)),
+				ExpiresAt: jwt.NewNumericDate(time.Now().Add(30 * time.Minute)),
 				IssuedAt:  jwt.NewNumericDate(time.Now()),
 			},
 		}
@@ -1365,7 +1395,7 @@ func Test_JWTPayloadTampering(t *testing.T) {
 			UserID: "user-123",
 			Email:  "user@example.com",
 			RegisteredClaims: jwt.RegisteredClaims{
-				ExpiresAt: jwt.NewNumericDate(time.Now().Add(24 * time.Hour)),
+				ExpiresAt: jwt.NewNumericDate(time.Now().Add(30 * time.Minute)),
 				IssuedAt:  jwt.NewNumericDate(time.Now()),
 			},
 		}
@@ -1560,5 +1590,124 @@ func Test_RateLimiter(t *testing.T) {
 		rl.mu.RUnlock()
 
 		assert.False(t, exists)
+	})
+}
+
+// Test_createRefreshToken tests refresh token creation
+func Test_createRefreshToken(t *testing.T) {
+	svc, mock, cleanup := setupTestService(t)
+	defer cleanup()
+
+	t.Run("creates valid refresh token", func(t *testing.T) {
+		userID := "test-user-id"
+
+		// Mock refresh token creation using GORM Create with RETURNING
+		mock.ExpectBegin()
+		mock.ExpectQuery(regexp.QuoteMeta(`INSERT INTO "refresh_tokens"`)).
+			WithArgs(userID, sqlmock.AnyArg(), sqlmock.AnyArg(), sqlmock.AnyArg()).
+			WillReturnRows(sqlmock.NewRows([]string{"id"}).AddRow("refresh-token-id"))
+		mock.ExpectCommit()
+
+		token, err := svc.createRefreshToken(userID)
+		require.NoError(t, err)
+		assert.NotEmpty(t, token)
+		assert.Equal(t, 64, len(token)) // 32 bytes * 2 (hex)
+		assert.NoError(t, mock.ExpectationsWereMet())
+	})
+
+	t.Run("stores refresh token in database", func(t *testing.T) {
+		userID := "test-user-id"
+
+		// Mock refresh token creation using GORM Create with RETURNING
+		mock.ExpectBegin()
+		mock.ExpectQuery(regexp.QuoteMeta(`INSERT INTO "refresh_tokens"`)).
+			WithArgs(userID, sqlmock.AnyArg(), sqlmock.AnyArg(), sqlmock.AnyArg()).
+			WillReturnRows(sqlmock.NewRows([]string{"id"}).AddRow("refresh-token-id"))
+		mock.ExpectCommit()
+
+		token, err := svc.createRefreshToken(userID)
+		require.NoError(t, err)
+		assert.NotEmpty(t, token)
+		assert.NoError(t, mock.ExpectationsWereMet())
+	})
+}
+
+// Test_Refresh tests token refresh functionality
+func Test_Refresh(t *testing.T) {
+	ctx := context.Background()
+
+	t.Run("successful refresh", func(t *testing.T) {
+		svc, mock, cleanup := setupTestService(t)
+		defer cleanup()
+
+		userID := "user-123"
+		refreshToken := "valid-refresh-token"
+
+		// Mock refresh token lookup
+		mock.ExpectQuery(regexp.QuoteMeta(`SELECT * FROM "refresh_tokens" WHERE token = $1 AND expires_at > $2 ORDER BY "refresh_tokens"."id" LIMIT $3`)).
+			WithArgs(refreshToken, sqlmock.AnyArg(), 1).
+			WillReturnRows(sqlmock.NewRows([]string{"id", "user_id", "token", "expires_at"}).
+				AddRow("token-id", userID, refreshToken, time.Now().Add(24*time.Hour)))
+
+		// Mock user lookup
+		mock.ExpectQuery(regexp.QuoteMeta(`SELECT * FROM "users" WHERE id = $1 ORDER BY "users"."id" LIMIT $2`)).
+			WithArgs(userID, 1).
+			WillReturnRows(sqlmock.NewRows([]string{"id", "email", "user_type", "profile_complete"}).
+				AddRow(userID, "user@example.com", "customer", false))
+
+		req := &RefreshRequest{RefreshToken: refreshToken}
+		resp, err := svc.Refresh(ctx, req)
+
+		require.NoError(t, err)
+		assert.NotEmpty(t, resp.Token)
+		assert.Equal(t, refreshToken, resp.RefreshToken)
+		assert.NoError(t, mock.ExpectationsWereMet())
+	})
+
+	t.Run("invalid refresh token", func(t *testing.T) {
+		svc, mock, cleanup := setupTestService(t)
+		defer cleanup()
+
+		invalidToken := "invalid-token"
+		mock.ExpectQuery(regexp.QuoteMeta(`SELECT * FROM "refresh_tokens" WHERE token = $1 AND expires_at > $2 ORDER BY "refresh_tokens"."id" LIMIT $3`)).
+			WithArgs(invalidToken, sqlmock.AnyArg(), 1).
+			WillReturnError(gorm.ErrRecordNotFound)
+
+		req := &RefreshRequest{RefreshToken: invalidToken}
+		_, err := svc.Refresh(ctx, req)
+
+		assert.Error(t, err)
+		assert.Contains(t, err.Error(), "invalid or expired refresh token")
+		assert.NoError(t, mock.ExpectationsWereMet())
+	})
+
+	t.Run("expired refresh token", func(t *testing.T) {
+		svc, mock, cleanup := setupTestService(t)
+		defer cleanup()
+
+		expiredToken := "expired-token"
+		mock.ExpectQuery(regexp.QuoteMeta(`SELECT * FROM "refresh_tokens" WHERE token = $1 AND expires_at > $2 ORDER BY "refresh_tokens"."id" LIMIT $3`)).
+			WithArgs(expiredToken, sqlmock.AnyArg(), 1).
+			WillReturnError(gorm.ErrRecordNotFound) // Expired tokens won't be found
+
+		req := &RefreshRequest{RefreshToken: expiredToken}
+		_, err := svc.Refresh(ctx, req)
+
+		assert.Error(t, err)
+		assert.Contains(t, err.Error(), "invalid or expired refresh token")
+		assert.NoError(t, mock.ExpectationsWereMet())
+	})
+
+	t.Run("empty request", func(t *testing.T) {
+		svc, _, cleanup := setupTestService(t)
+		defer cleanup()
+
+		_, err := svc.Refresh(ctx, nil)
+		assert.Error(t, err)
+		assert.Contains(t, err.Error(), "invalid request")
+
+		_, err = svc.Refresh(ctx, &RefreshRequest{RefreshToken: ""})
+		assert.Error(t, err)
+		assert.Contains(t, err.Error(), "invalid request")
 	})
 }

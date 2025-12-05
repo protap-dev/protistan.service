@@ -7,15 +7,16 @@ import (
 )
 
 type CreateBookingRequest struct {
-	ServiceCategoryID     string            `json:"service_category_id"`
-	Title                 string            `json:"title"`
-	Description           string            `json:"description,omitempty"`
-	CustomerAddressID     string            `json:"customer_address_id"`
-	Priority              string            `json:"priority,omitempty"`
-	ScheduledAt           *time.Time        `json:"scheduled_at,omitempty"`
-	EstimatedDurationMins int               `json:"estimated_duration_mins,omitempty"`
-	Metadata              map[string]string `json:"metadata,omitempty"`
-	SpecificArtisanID     *string           `json:"specific_artisan_id,omitempty"` // Request specific artisan
+	IdempotencyKey    *string           `json:"idempotency_key,omitempty"`
+	ServiceCategoryID string            `json:"service_category_id"`
+	ServiceID         string            `json:"service_id"`
+	Description       string            `json:"description,omitempty"`
+	CustomerAddressID string            `json:"customer_address_id"`
+	ScheduledAt       *time.Time        `json:"scheduled_at,omitempty"`
+	IsFlexible        bool              `json:"is_flexible"`
+	MediaURLs         []string          `json:"media_urls,omitempty"`
+	Metadata          map[string]string `json:"metadata,omitempty"`
+	SpecificArtisanID *string           `json:"specific_artisan_id,omitempty"` // Request specific artisan
 }
 
 type UpdateStatusRequest struct {
@@ -24,7 +25,7 @@ type UpdateStatusRequest struct {
 }
 
 type RematchBookingRequest struct {
-	Reason *string `json:"reason,omitempty"` // Optional reason for rematch request
+	Reason *string `json:"reason,omitempty"`
 }
 
 type CancelBookingRequest struct {
@@ -32,26 +33,26 @@ type CancelBookingRequest struct {
 }
 
 type ListBookingsParams struct {
-	Status string `json:"status,omitempty"`
-	Limit  int    `json:"limit,omitempty"`
-	Offset int    `json:"offset,omitempty"`
+	Status string `query:"status,omitempty"`
+	Limit  int    `query:"limit,omitempty"`
+	Offset int    `query:"offset,omitempty"`
 }
 
 type BookingResponse struct {
-	ID                    string               `json:"id"`
-	CustomerID            string               `json:"customer_id"`
-	ArtisanID             *string              `json:"artisan_id,omitempty"`
-	ServiceCategoryID     string               `json:"service_category_id"`
-	Title                 string               `json:"title"`
-	Description           string               `json:"description,omitempty"`
-	CustomerAddressID     string               `json:"customer_address_id"`
-	Status                domain.BookingStatus `json:"status"`
-	Priority              string               `json:"priority,omitempty"`
-	ScheduledAt           *time.Time           `json:"scheduled_at,omitempty"`
-	EstimatedDurationMins int                  `json:"estimated_duration_mins,omitempty"`
-	Metadata              map[string]string    `json:"metadata,omitempty"`
-	CreatedAt             time.Time            `json:"created_at"`
-	UpdatedAt             time.Time            `json:"updated_at"`
+	ID                string               `json:"id"`
+	CustomerID        string               `json:"customer_id"`
+	ArtisanID         *string              `json:"artisan_id,omitempty"`
+	ServiceCategoryID string               `json:"service_category_id"`
+	Title             string               `json:"title"`
+	Description       string               `json:"description,omitempty"`
+	CustomerAddressID string               `json:"customer_address_id"`
+	Status            domain.BookingStatus `json:"status"`
+	Priority          string               `json:"priority,omitempty"`
+	IsFlexible        bool                 `json:"is_flexible"`
+	ScheduledAt       *time.Time           `json:"scheduled_at,omitempty"`
+	Metadata          map[string]string    `json:"metadata,omitempty"`
+	CreatedAt         time.Time            `json:"created_at"`
+	UpdatedAt         time.Time            `json:"updated_at"`
 }
 
 type ListBookingsResponse struct {
@@ -65,7 +66,7 @@ type ListBookingsResponse struct {
 
 // OfferBookingRequest is the request to offer a booking to an artisan
 type OfferBookingRequest struct {
-	ArtisanID string `json:"artisan_id"`         // Artisan to offer the booking to
+	ArtisanID string `json:"artisan_id"`           // Artisan to offer the booking to
 	ExpiresIn int    `json:"expires_in,omitempty"` // Hours until offer expires (default: 24)
 }
 
@@ -86,21 +87,44 @@ type ListOffersParams struct {
 
 // OfferResponse represents an offer in API responses
 type OfferResponse struct {
-	ID           string    `json:"id"`
-	BookingID    string    `json:"booking_id"`
-	ArtisanID    string    `json:"artisan_id"`
-	Status       string    `json:"status"`
-	OfferedBy    string    `json:"offered_by"`
-	OfferedAt    time.Time `json:"offered_at"`
-	ExpiresAt    time.Time `json:"expires_at"`
+	ID           string     `json:"id"`
+	BookingID    string     `json:"booking_id"`
+	ArtisanID    string     `json:"artisan_id"`
+	Status       string     `json:"status"`
+	OfferedBy    string     `json:"offered_by"`
+	OfferedAt    time.Time  `json:"offered_at"`
+	ExpiresAt    time.Time  `json:"expires_at"`
 	RespondedAt  *time.Time `json:"responded_at,omitempty"`
-	RejectReason *string   `json:"reject_reason,omitempty"`
-	CreatedAt    time.Time `json:"created_at"`
-	UpdatedAt    time.Time `json:"updated_at"`
+	RejectReason *string    `json:"reject_reason,omitempty"`
+	CreatedAt    time.Time  `json:"created_at"`
+	UpdatedAt    time.Time  `json:"updated_at"`
 }
 
 // ListOffersResponse contains a list of offers
 type ListOffersResponse struct {
 	Offers []*OfferResponse `json:"offers"`
-	Total    int              `json:"total"`
+	Total  int              `json:"total"`
+}
+
+type BookingPreviewDTO struct {
+	ID                string     `json:"id"`
+	ServiceType       string     `json:"service_type"`
+	CustomerFirstName string     `json:"customer_first_name"`
+	LocationArea      string     `json:"location_area"`
+	Distance          float64    `json:"distance_miles"`
+	Description       string     `json:"description"`
+	Photos            []string   `json:"photos"`
+	ScheduledAt       *time.Time `json:"scheduled_at,omitempty"`
+	IsFlexible        bool       `json:"is_flexible,omitempty"`
+}
+type ArtisanOfferResponse struct {
+	ID        string            `json:"id"`
+	Status    string            `json:"status"`
+	ExpiresAt time.Time         `json:"expires_at"`
+	Booking   BookingPreviewDTO `json:"booking"`
+}
+
+type ListArtisanOffersResponse struct {
+	Offers []*ArtisanOfferResponse `json:"offers"`
+	Total  int                     `json:"total"`
 }

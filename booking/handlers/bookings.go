@@ -2,9 +2,13 @@ package handlers
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"slices"
+	"strings"
 	"time"
 
 	"encore.app/booking/domain"
@@ -55,6 +59,19 @@ func (h *BookingsHandler) GetRepository() domain.BookingRepository {
 	return h.repo
 }
 
+// Helper function to copy metadata safely
+func copyMetadata(src map[string]string) map[string]string {
+	if src == nil {
+		return make(map[string]string)
+	}
+
+	dst := make(map[string]string, len(src))
+	for k, v := range src {
+		dst[k] = v
+	}
+	return dst
+}
+
 // =============================
 // API Methods (Handler Level)
 // =============================
@@ -65,56 +82,114 @@ func (h *BookingsHandler) CreateBooking(ctx context.Context, req *CreateBookingR
 		return nil, err
 	}
 
-	// Check if customer is requesting a specific artisan
-	isSpecificArtisan := req.SpecificArtisanID != nil && *req.SpecificArtisanID != ""
+	// Handle idempotency key if provided
+	if req.IdempotencyKey != nil && *req.IdempotencyKey != "" {
+		// Generate request hash from request body for validation
+		requestHash := generateRequestHash(req)
 
-	booking := &domain.Booking{
-		CustomerID:            userCtx.ID,
-		ServiceCategoryID:     req.ServiceCategoryID,
-		Title:                 req.Title,
-		Description:           req.Description,
-		CustomerAddressID:     req.CustomerAddressID,
-		Status:                domain.BookingRequested,
-		Priority:              req.Priority,
-		ScheduledAt:           req.ScheduledAt,
-		EstimatedDurationMins: req.EstimatedDurationMins,
-		Metadata:              req.Metadata,
-		IsSpecificArtisan:     isSpecificArtisan,
-		CreatedAt:             time.Now(),
-		UpdatedAt:             time.Now(),
-		Version:               1,
+		// Check if this idempotency key was already processed
+		existingRecord, err := h.repo.CheckIdempotencyKey(ctx, *req.IdempotencyKey, userCtx.ID, requestHash)
+		if err != nil {
+			h.logger.Error(ctx, "idempotency key check failed", err, map[string]interface{}{
+				"user_id": userCtx.ID,
+			})
+			return nil, binternal.ErrDatabaseError
+		}
+
+		if existingRecord != nil {
+			// Request already processed
+			if existingRecord.Status == "completed" {
+				// Return cached response
+				var cachedResponse BookingResponse
+				if err := json.Unmarshal(existingRecord.ResponseBody, &cachedResponse); err == nil {
+					return &cachedResponse, nil
+				}
+			}
+
+			if existingRecord.Status == "processing" {
+				// Another request is currently processing - return conflict
+				return nil, errs.B().Code(errs.Aborted).
+					Msg("request with this idempotency key is already being processed").Err()
+			}
+		}
+
+		// Store idempotency key atomically (24 hour expiration)
+		expiresAt := time.Now().Add(24 * time.Hour)
+		err = h.repo.StoreIdempotencyKey(ctx, *req.IdempotencyKey, userCtx.ID, requestHash, expiresAt)
+		if err != nil {
+			// If duplicate key error, another concurrent request won - return conflict
+			if strings.Contains(err.Error(), "duplicate") {
+				return nil, errs.B().Code(errs.Aborted).
+					Msg("request with this idempotency key is already being processed").Err()
+			}
+			return nil, binternal.ErrDatabaseError
+		}
 	}
 
-	if err := binternal.ValidateCustomerRole(ctx, userCtx.ID, h.logger); err != nil {
-		return nil, err
+	var artisanID *string
+	isSpecificArtisan := false
+	var specificArtisanID string // Store separately for auto-offer creation
+	if req.SpecificArtisanID != nil && *req.SpecificArtisanID != "" {
+		isSpecificArtisan = true
+		specificArtisanID = *req.SpecificArtisanID
+		// Don't set artisanID here - create booking without artisan first
 	}
 
-	if err := h.validator.ValidateCreateRequest(&domain.CreateBookingRequest{
-		ServiceCategoryID:     req.ServiceCategoryID,
-		Title:                 req.Title,
-		Description:           req.Description,
-		CustomerAddressID:     req.CustomerAddressID,
-		Priority:              req.Priority,
-		ScheduledAt:           req.ScheduledAt,
-		EstimatedDurationMins: req.EstimatedDurationMins,
-		Metadata:              req.Metadata,
-	}); err != nil {
+	// Construct the domain request for validation
+	domainReq := &domain.CreateBookingRequest{
+		ServiceCategoryID: req.ServiceCategoryID,
+		ServiceID:         req.ServiceID,
+		CustomerAddressID: req.CustomerAddressID,
+		Description:       req.Description,
+		MediaURLs:         req.MediaURLs,
+		ScheduledAt:       req.ScheduledAt,
+		IsFlexible:        req.IsFlexible,
+	}
+
+	// Validate input first
+	if err := h.validator.ValidateCreateRequest(domainReq); err != nil {
 		h.logger.Error(ctx, "validation failed", err, map[string]interface{}{
 			"user_id": userCtx.ID,
 		})
 		return nil, binternal.ErrInvalidInput
 	}
 
-	domainReq := &domain.CreateBookingRequest{
-		ServiceCategoryID:     req.ServiceCategoryID,
-		Title:                 req.Title,
-		Description:           req.Description,
-		CustomerAddressID:     req.CustomerAddressID,
-		Priority:              req.Priority,
-		ScheduledAt:           req.ScheduledAt,
-		EstimatedDurationMins: req.EstimatedDurationMins,
-		Metadata:              req.Metadata,
+	// Generate a title automatically
+	var autoTitle string
+	serviceName := req.Metadata["service_name"]
+	if serviceName != "" {
+		autoTitle = fmt.Sprintf("%s.", serviceName)
+	} else {
+		autoTitle = fmt.Sprintf("Service Request: %s", time.Now().Format("Jan 02"))
 	}
+
+	// Default priority based on ScheduledAt
+	defaultPriority := "normal"
+	if req.ScheduledAt != nil && time.Until(*req.ScheduledAt) < 24*time.Hour {
+		defaultPriority = "high"
+	}
+
+	booking := &domain.Booking{
+		CustomerID:        userCtx.ID,
+		ArtisanID:         artisanID, // Will be nil for auto-offer case
+		ServiceCategoryID: req.ServiceCategoryID,
+		ServiceID:         req.ServiceID,
+		Title:             autoTitle,
+		Description:       req.Description,
+		CustomerAddressID: req.CustomerAddressID,
+		Status:            domain.BookingRequested,
+		MediaURLs:         req.MediaURLs,
+		IsFlexible:        req.IsFlexible,
+		ScheduledAt:       req.ScheduledAt,
+		Priority:          defaultPriority,
+		IsSpecificArtisan: isSpecificArtisan,
+		Metadata:          copyMetadata(req.Metadata), // Copy request metadata
+		CreatedAt:         time.Now(),
+		UpdatedAt:         time.Now(),
+		Version:           1,
+	}
+
+	// Validate references
 	if err := binternal.ValidateBookingReferences(ctx, domainReq, userCtx.ID, h.logger); err != nil {
 		h.logger.Error(ctx, "service reference validation failed", err, map[string]interface{}{
 			"user_id": userCtx.ID,
@@ -131,7 +206,7 @@ func (h *BookingsHandler) CreateBooking(ctx context.Context, req *CreateBookingR
 
 	h.cache.Set(ctx, binternal.BookingCacheKey(booking.ID), booking, binternal.DefaultServiceConfig().Cache.BookingTTL)
 
-	// Create and publish created event within transaction context for atomicity
+	// Create and publish created event
 	event := &domain.BookingEvent{
 		BookingID:      booking.ID,
 		Status:         booking.Status,
@@ -140,15 +215,46 @@ func (h *BookingsHandler) CreateBooking(ctx context.Context, req *CreateBookingR
 		UserID:         userCtx.ID,
 	}
 
-	// Use the repository's outbox method for atomic event publishing
 	if err := h.repo.CreateEventInOutbox(ctx, event); err != nil {
 		h.logger.Error(ctx, "failed to publish booking created event", err, map[string]interface{}{
 			"booking_id": booking.ID,
 		})
-		// Don't fail the request if event publishing fails - the booking was created successfully
 	}
 
-	return h.toResponse(booking), nil
+	// Auto-create offer if specific artisan is requested
+	var offer *domain.BookingOffer
+	if isSpecificArtisan && specificArtisanID != "" {
+		offer, err = h.CreateOfferInternal(ctx, booking.ID, specificArtisanID, userCtx.ID, 24) // Default 24 hours
+		if err != nil {
+			h.logger.Error(ctx, "failed to create automatic offer for specific artisan", err, map[string]any{
+				"booking_id": booking.ID,
+				"artisan_id": specificArtisanID,
+			})
+			// Don't fail the entire booking creation, just log the error
+			// The booking exists and can be offered manually later
+		}
+	}
+
+	response := h.toResponse(booking)
+
+	// Add offer metadata to response if offer was created
+	if offer != nil {
+		if response.Metadata == nil {
+			response.Metadata = make(map[string]string)
+		}
+		response.Metadata["offer_id"] = offer.ID
+		response.Metadata["offer_status"] = string(offer.Status)
+		response.Metadata["offer_expires_at"] = offer.ExpiresAt.Format(time.RFC3339)
+		response.Metadata["auto_offered"] = "true"
+		response.Metadata["offered_to"] = offer.ArtisanID
+	}
+
+	// Complete idempotency key if provided
+	if req.IdempotencyKey != nil && *req.IdempotencyKey != "" {
+		_ = h.repo.CompleteIdempotencyKey(ctx, *req.IdempotencyKey, booking.ID, response)
+	}
+
+	return response, nil
 }
 
 func (h *BookingsHandler) UpdateBookingStatus(ctx context.Context, id string, req *UpdateStatusRequest) (*BookingResponse, error) {
@@ -262,8 +368,9 @@ func (h *BookingsHandler) ListBookings(ctx context.Context, params *ListBookings
 	}
 
 	if params.Status != "" {
-		status := domain.BookingStatus(params.Status)
-		validStatus := slices.Contains([]domain.BookingStatus{
+		// Split comma-separated statuses
+		statusStrings := strings.Split(params.Status, ",")
+		validStatuses := []domain.BookingStatus{
 			domain.BookingRequested,
 			domain.BookingOfferPending,
 			domain.BookingOfferRejected,
@@ -271,6 +378,7 @@ func (h *BookingsHandler) ListBookings(ctx context.Context, params *ListBookings
 			domain.BookingPendingQuote,
 			domain.BookingQuoteProposed,
 			domain.BookingQuoteAccepted,
+			domain.BookingQuoteRejected,
 			domain.BookingPaymentPending,
 			domain.BookingConfirmed,
 			domain.BookingEnroute,
@@ -278,14 +386,22 @@ func (h *BookingsHandler) ListBookings(ctx context.Context, params *ListBookings
 			domain.BookingCompleted,
 			domain.BookingCancelled,
 			domain.BookingClosed,
-		}, status)
-		if !validStatus {
-			return nil, binternal.ErrValidationFailed
 		}
 
+		// Validate each status
+		requestedStatuses := make([]domain.BookingStatus, 0, len(statusStrings))
+		for _, s := range statusStrings {
+			status := domain.BookingStatus(strings.TrimSpace(s))
+			if !slices.Contains(validStatuses, status) {
+				return nil, binternal.ErrValidationFailed
+			}
+			requestedStatuses = append(requestedStatuses, status)
+		}
+
+		// Filter bookings by any of the requested statuses
 		filtered := make([]*domain.Booking, 0)
 		for _, b := range bookings {
-			if b.Status == status {
+			if slices.Contains(requestedStatuses, b.Status) {
 				filtered = append(filtered, b)
 			}
 		}
@@ -489,20 +605,20 @@ func (h *BookingsHandler) toResponse(booking *domain.Booking) *BookingResponse {
 		scheduledAt = booking.ScheduledAt
 	}
 	return &BookingResponse{
-		ID:                    booking.ID,
-		CustomerID:            booking.CustomerID,
-		ArtisanID:             artisanID,
-		ServiceCategoryID:     booking.ServiceCategoryID,
-		Title:                 booking.Title,
-		Description:           booking.Description,
-		CustomerAddressID:     booking.CustomerAddressID,
-		Status:                booking.Status,
-		Priority:              booking.Priority,
-		ScheduledAt:           scheduledAt,
-		EstimatedDurationMins: booking.EstimatedDurationMins,
-		Metadata:              booking.Metadata,
-		CreatedAt:             booking.CreatedAt,
-		UpdatedAt:             booking.UpdatedAt,
+		ID:                booking.ID,
+		CustomerID:        booking.CustomerID,
+		ArtisanID:         artisanID,
+		ServiceCategoryID: booking.ServiceCategoryID,
+		Title:             booking.Title,
+		Description:       booking.Description,
+		CustomerAddressID: booking.CustomerAddressID,
+		Status:            booking.Status,
+		Priority:          booking.Priority,
+		IsFlexible:        booking.IsFlexible,
+		ScheduledAt:       scheduledAt,
+		Metadata:          booking.Metadata,
+		CreatedAt:         booking.CreatedAt,
+		UpdatedAt:         booking.UpdatedAt,
 	}
 }
 
@@ -520,4 +636,18 @@ func (h *BookingsHandler) toOfferResponse(offer *domain.BookingOffer) *OfferResp
 		CreatedAt:    offer.CreatedAt,
 		UpdatedAt:    offer.UpdatedAt,
 	}
+}
+
+func generateRequestHash(req *CreateBookingRequest) string {
+	// Create deterministic hash of request fields (excluding idempotency key)
+	data := fmt.Sprintf("%s|%s|%s|%s|%v|%v",
+		req.ServiceCategoryID,
+		req.ServiceID,
+		req.CustomerAddressID,
+		req.Description,
+		req.ScheduledAt,
+		req.IsFlexible,
+	)
+	hash := sha256.Sum256([]byte(data))
+	return hex.EncodeToString(hash[:])
 }

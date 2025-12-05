@@ -46,6 +46,7 @@ type Booking struct {
 	CustomerID            string            `json:"customer_id"`
 	ArtisanID             *string           `json:"artisan_id,omitempty"`
 	ServiceCategoryID     string            `json:"service_category_id"`
+	ServiceID             string            `json:"service_id"`
 	Title                 string            `json:"title"`
 	Description           string            `json:"description,omitempty"`
 	CustomerAddressID     string            `json:"customer_address_id"`
@@ -54,6 +55,8 @@ type Booking struct {
 	ScheduledAt           *time.Time        `json:"scheduled_at,omitempty"`
 	EstimatedDurationMins int               `json:"estimated_duration_mins,omitempty"`
 	Metadata              map[string]string `json:"metadata,omitempty"`
+	MediaURLs             []string          `json:"media_urls"`
+	IsFlexible            bool              `json:"is_flexible"`
 
 	// Offer tracking
 	IsSpecificArtisan bool `json:"is_specific_artisan"` // true if customer requested specific artisan
