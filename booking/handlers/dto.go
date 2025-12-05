@@ -105,3 +105,26 @@ type ListOffersResponse struct {
 	Offers []*OfferResponse `json:"offers"`
 	Total  int              `json:"total"`
 }
+
+type BookingPreviewDTO struct {
+	ID                string     `json:"id"`
+	ServiceType       string     `json:"service_type"`
+	CustomerFirstName string     `json:"customer_first_name"`
+	LocationArea      string     `json:"location_area"`
+	Distance          float64    `json:"distance_miles"`
+	Description       string     `json:"description"`
+	Photos            []string   `json:"photos"`
+	ScheduledAt       *time.Time `json:"scheduled_at,omitempty"`
+	IsFlexible        bool       `json:"is_flexible,omitempty"`
+}
+type ArtisanOfferResponse struct {
+	ID        string            `json:"id"`
+	Status    string            `json:"status"`
+	ExpiresAt time.Time         `json:"expires_at"`
+	Booking   BookingPreviewDTO `json:"booking"`
+}
+
+type ListArtisanOffersResponse struct {
+	Offers []*ArtisanOfferResponse `json:"offers"`
+	Total  int                     `json:"total"`
+}

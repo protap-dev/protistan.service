@@ -38,6 +38,7 @@ type BookingRepository interface {
 	GetOfferByID(ctx context.Context, offerID string) (*BookingOffer, error)
 	GetOffersByBookingID(ctx context.Context, bookingID string) ([]*BookingOffer, error)
 	GetOffersByArtisanID(ctx context.Context, artisanID string, status BookingOfferStatus) ([]*BookingOffer, error)
+	GetArtisanOffersWithDetails(ctx context.Context, artisanID string, status BookingOfferStatus) ([]*ArtisanOfferDetails, error)
 	UpdateOfferStatus(ctx context.Context, offerID string, status BookingOfferStatus, reason *string) error
 	CancelPendingOffers(ctx context.Context, bookingID string) error
 

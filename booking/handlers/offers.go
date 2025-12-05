@@ -417,7 +417,7 @@ func (h *BookingsHandler) ListBookingOffers(ctx context.Context, bookingID strin
 }
 
 // ListArtisanOffers lists all offers for the authenticated artisan
-func (h *BookingsHandler) ListArtisanOffers(ctx context.Context, params *ListOffersParams) (*ListOffersResponse, error) {
+func (h *BookingsHandler) ListArtisanOffers(ctx context.Context, params *ListOffersParams) (*ListArtisanOffersResponse, error) {
 	userCtx, err := h.authHelper.ExtractUserContext(ctx, "list_artisan_offers")
 	if err != nil {
 		return nil, err
@@ -438,8 +438,8 @@ func (h *BookingsHandler) ListArtisanOffers(ctx context.Context, params *ListOff
 		status = domain.BookingOfferStatus(params.Status)
 	}
 
-	// Get offers
-	offers, err := h.repo.GetOffersByArtisanID(ctx, userCtx.ID, status)
+	// Get offers with details
+	offerDetails, err := h.repo.GetArtisanOffersWithDetails(ctx, userCtx.ID, status)
 	if err != nil {
 		h.logger.Error(ctx, "failed to list artisan offers", err, map[string]any{
 			"artisan_id": userCtx.ID,
@@ -449,12 +449,27 @@ func (h *BookingsHandler) ListArtisanOffers(ctx context.Context, params *ListOff
 	}
 
 	// Convert to response DTOs
-	offerResponses := make([]*OfferResponse, len(offers))
-	for i, offer := range offers {
-		offerResponses[i] = h.toOfferResponse(offer)
+	offerResponses := make([]*ArtisanOfferResponse, len(offerDetails))
+	for i, detail := range offerDetails {
+		offerResponses[i] = &ArtisanOfferResponse{
+			ID:        detail.Offer.ID,
+			Status:    string(detail.Offer.Status),
+			ExpiresAt: detail.Offer.ExpiresAt,
+			Booking: BookingPreviewDTO{
+				ID:                detail.Booking.ID,
+				ServiceType:       detail.Booking.ServiceCategoryID,
+				CustomerFirstName: detail.CustomerFirstName,
+				LocationArea:      fmt.Sprintf("%s, %s", detail.CustomerCity, detail.CustomerState),
+				Description:       detail.Booking.Description,
+				Photos:            detail.Booking.MediaURLs,
+				Distance:          0, // Placeholder as we don't calculate distance yet
+				ScheduledAt:       detail.Booking.ScheduledAt,
+				IsFlexible:        detail.Booking.IsFlexible,
+			},
+		}
 	}
 
-	return &ListOffersResponse{
+	return &ListArtisanOffersResponse{
 		Offers: offerResponses,
 		Total:  len(offerResponses),
 	}, nil

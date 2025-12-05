@@ -63,6 +63,17 @@ func (v *addressValidator) ValidateAddress(req *AddAddressRequest) error {
 		}
 	}
 
+	// Validate Country if provided
+	if req.Country != nil {
+		countryLen := len(strings.TrimSpace(*req.Country))
+		if countryLen < 2 {
+			return errors.New("country must be at least 2 characters")
+		}
+		if countryLen > 100 {
+			return errors.New("country must be no more than 100 characters")
+		}
+	}
+
 	return nil
 }
 

@@ -31,6 +31,15 @@ type BookingOffer struct {
 	UpdatedAt    time.Time          `json:"updated_at"`
 }
 
+// ArtisanOfferDetails contains the offer with associated booking and customer details
+type ArtisanOfferDetails struct {
+	Offer             *BookingOffer
+	Booking           *Booking
+	CustomerFirstName string
+	CustomerCity      string
+	CustomerState     string
+}
+
 // IsExpired checks if the offer has expired
 func (o *BookingOffer) IsExpired() bool {
 	return time.Now().After(o.ExpiresAt) && o.Status == OfferPending

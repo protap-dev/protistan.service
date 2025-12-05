@@ -246,6 +246,7 @@ func (h *BookingsHandler) CreateBooking(ctx context.Context, req *CreateBookingR
 		response.Metadata["offer_status"] = string(offer.Status)
 		response.Metadata["offer_expires_at"] = offer.ExpiresAt.Format(time.RFC3339)
 		response.Metadata["auto_offered"] = "true"
+		response.Metadata["offered_to"] = offer.ArtisanID
 	}
 
 	// Complete idempotency key if provided
