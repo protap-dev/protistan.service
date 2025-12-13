@@ -432,14 +432,31 @@ func (h *BookingsHandler) ListArtisanOffers(ctx context.Context, params *ListOff
 		return nil, binternal.ErrPermissionDenied
 	}
 
-	// Parse status filter
-	var status domain.BookingOfferStatus
+	// Build filter from request params
+	filter := domain.OfferFilter{}
 	if params.Status != "" {
-		status = domain.BookingOfferStatus(params.Status)
+		filter.Status = domain.BookingOfferStatus(params.Status)
+	}
+
+	// Parse ExpiresAfter parameter
+	if params.ExpiresAfter != "" {
+		// Try parsing as a duration (e.g., "5h", "24h")
+		duration, err := time.ParseDuration(params.ExpiresAfter)
+		if err == nil {
+			expiresAfterTime := time.Now().Add(-duration)
+			filter.ExpiresAfter = &expiresAfterTime
+		} else {
+			// Try parsing as a timestamp (RFC3339)
+			expiresAfterTime, err := time.Parse(time.RFC3339, params.ExpiresAfter)
+			if err != nil {
+				return nil, fmt.Errorf("invalid expires_after format: must be a duration string or RFC3339 timestamp")
+			}
+			filter.ExpiresAfter = &expiresAfterTime
+		}
 	}
 
 	// Get offers with details
-	offerDetails, err := h.repo.GetArtisanOffersWithDetails(ctx, userCtx.ID, status)
+	offerDetails, err := h.repo.GetArtisanOffersWithDetails(ctx, userCtx.ID, filter)
 	if err != nil {
 		h.logger.Error(ctx, "failed to list artisan offers", err, map[string]any{
 			"artisan_id": userCtx.ID,

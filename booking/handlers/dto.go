@@ -80,9 +80,10 @@ type RejectOfferRequest struct {
 
 // ListOffersParams contains query parameters for listing offers
 type ListOffersParams struct {
-	Status string `query:"status"` // Filter by offer status
-	Limit  int    `query:"limit"`  // Max number of results
-	Offset int    `query:"offset"` // Pagination offset
+	Status       string `query:"status"` // Filter by offer status
+	ExpiresAfter string `query:"expires_after,omitempty"`
+	Limit        int    `query:"limit"`  // Max number of results
+	Offset       int    `query:"offset"` // Pagination offset
 }
 
 // OfferResponse represents an offer in API responses

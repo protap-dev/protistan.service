@@ -57,3 +57,9 @@ var (
 	ErrOfferAlreadyTaken    = errors.New("booking already accepted by another artisan")
 	ErrCannotRespondToOffer = errors.New("cannot respond to this offer")
 )
+
+// OfferFilter encapsulates filter criteria for listing offers.
+type OfferFilter struct {
+	Status       BookingOfferStatus
+	ExpiresAfter *time.Time
+}

@@ -53,11 +53,14 @@ func (r *bookingRepository) GetOffersByBookingID(ctx context.Context, bookingID 
 }
 
 // GetOffersByArtisanID retrieves offers for an artisan filtered by status
-func (r *bookingRepository) GetOffersByArtisanID(ctx context.Context, artisanID string, status domain.BookingOfferStatus) ([]*domain.BookingOffer, error) {
+func (r *bookingRepository) GetOffersByArtisanID(ctx context.Context, artisanID string, filter domain.OfferFilter) ([]*domain.BookingOffer, error) {
 	query := r.db.WithContext(ctx).Where("artisan_id = ?", artisanID)
 
-	if status != "" {
-		query = query.Where("status = ?", string(status))
+	if filter.Status != "" {
+		query = query.Where("status = ?", string(filter.Status))
+	}
+	if filter.ExpiresAfter != nil {
+		query = query.Where("expires_at > ?", *filter.ExpiresAfter)
 	}
 
 	var dbModels []offerDBModel
@@ -152,9 +155,9 @@ func (r *bookingRepository) UpdateOffer(ctx context.Context, offer *domain.Booki
 }
 
 // GetArtisanOffersWithDetails retrieves offers with associated booking and customer details
-func (r *bookingRepository) GetArtisanOffersWithDetails(ctx context.Context, artisanID string, status domain.BookingOfferStatus) ([]*domain.ArtisanOfferDetails, error) {
+func (r *bookingRepository) GetArtisanOffersWithDetails(ctx context.Context, artisanID string, filter domain.OfferFilter) ([]*domain.ArtisanOfferDetails, error) {
 	// 1. Get Offers
-	offers, err := r.GetOffersByArtisanID(ctx, artisanID, status)
+	offers, err := r.GetOffersByArtisanID(ctx, artisanID, filter)
 	if err != nil {
 		return nil, err
 	}
