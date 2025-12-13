@@ -577,6 +577,13 @@ func (h *BookingsHandler) expireOffer(ctx context.Context, offer *domain.Booking
 			return nil
 		}
 
+		// Get booking to update status
+		booking, err := txRepo.GetByID(ctx, currentOffer.BookingID)
+		if err != nil {
+			return fmt.Errorf("failed to get booking: %w", err)
+		}
+		previousStatus := booking.Status
+
 		// Update offer status to expired
 		now := time.Now()
 		currentOffer.Status = domain.OfferExpired
@@ -588,11 +595,19 @@ func (h *BookingsHandler) expireOffer(ctx context.Context, offer *domain.Booking
 			return err
 		}
 
+		// Update booking status
+		booking.Status = domain.BookingOfferRejected
+		booking.UpdatedAt = now
+
+		if err := txRepo.Update(ctx, booking); err != nil {
+			return fmt.Errorf("failed to update booking status: %w", err)
+		}
+
 		// Create offer expired event
 		event := &domain.BookingEvent{
 			BookingID:      currentOffer.BookingID,
 			Status:         domain.BookingOfferRejected,
-			PreviousStatus: domain.BookingOfferPending,
+			PreviousStatus: previousStatus,
 			Timestamp:      now,
 			UserID:         "system",
 			ArtisanID:      &currentOffer.ArtisanID,
