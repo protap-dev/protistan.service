@@ -251,7 +251,7 @@ func (s *ProfileService) UpdateProfile(ctx context.Context, userCtx *internal.Us
 
 // UpdateAvailability updates the artisan's availability status
 func (s *ProfileService) UpdateAvailability(ctx context.Context, userCtx *internal.UserContext, status string) (*ArtisanProfile, error) {
-	if status != "available" && status != "unavailable" {
+	if status != ArtisanAvailabilityAvailable && status != ArtisanAvailabilityUnavailable {
 		return nil, fmt.Errorf("invalid status: %s", status)
 	}
 
@@ -498,7 +498,7 @@ func (s *ProfileService) createNew(ctx context.Context, input *CreateProfileInpu
 		Verified:            false,
 		Rating:              0.0,
 		ReviewsCount:        0,
-		AvailabilityStatus:  "unavailable",
+		AvailabilityStatus:  ArtisanAvailabilityUnavailable,
 	}
 
 	if err := s.repo.Create(ctx, artisan); err != nil {
