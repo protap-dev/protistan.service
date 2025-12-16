@@ -174,7 +174,7 @@ func (s *SearchService) executeSearchQuery(ctx context.Context, input *SearchInp
 		Joins("LEFT JOIN artisan_verifications av ON a.id = av.artisan_id")
 
 	// Enforce discoverability: only available artisans with at least one rate
-	query = query.Where("a.availability_status = ?", "available").
+	query = query.Where("a.availability_status = ?", ArtisanAvailabilityAvailable).
 		Where("a.rates_count > 0")
 
 	// Apply category filter

@@ -7,6 +7,11 @@ import (
 	"time"
 )
 
+const (
+	ArtisanAvailabilityAvailable   = "available"
+	ArtisanAvailabilityUnavailable = "unavailable"
+)
+
 // StringArray is a custom type for scanning string arrays from the database.
 type StringArray []string
 

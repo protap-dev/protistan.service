@@ -32,7 +32,7 @@ func (h *BookingsHandler) CreateOfferInternal(ctx context.Context, bookingID str
 		return nil, fmt.Errorf("failed to check artisan availability: %w", err)
 	}
 
-	if availabilityStatus == "unavailable" {
+	if availabilityStatus == "unavailable" { // TODO: Use artisans/domain.ArtisanAvailabilityUnavailable constant
 		h.logger.Info(ctx, "cannot offer booking: artisan is unavailable", map[string]any{
 			"artisan_id": artisanID,
 			"booking_id": bookingID,

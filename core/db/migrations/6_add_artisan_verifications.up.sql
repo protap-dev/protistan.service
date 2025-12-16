@@ -3,7 +3,7 @@
 
 -- Create the artisan_verifications table to track verification status with history
 CREATE TABLE artisan_verifications (
-    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    id UUID PRIMARY KEY DEFAULT generate_uuid(),
     artisan_id UUID NOT NULL REFERENCES artisans(id) ON DELETE CASCADE,
     verification_status VARCHAR(20) NOT NULL DEFAULT 'unverified',
     verification_method VARCHAR(50),

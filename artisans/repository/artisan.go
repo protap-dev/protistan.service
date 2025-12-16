@@ -108,6 +108,24 @@ func (r *artisanRepository) Create(ctx context.Context, artisan *domain.ArtisanP
 	return nil
 }
 
+// enrichWithVerificationStatus fetches verification status and sets the Verified field
+func (r *artisanRepository) enrichWithVerificationStatus(ctx context.Context, dbModel *ArtisanDBModel) (*domain.ArtisanProfile, error) {
+	// Fetch verification status
+	var verification ArtisanVerificationDBModel
+	if err := r.db.WithContext(ctx).Where("artisan_id = ?", dbModel.ID).First(&verification).Error; err != nil {
+		if !errors.Is(err, gorm.ErrRecordNotFound) {
+			return nil, err
+		}
+		verification.VerificationStatus = "unverified"
+	}
+
+	// Convert to domain model and set verified status based on verification table
+	domainModel := toDomainModel(dbModel)
+	domainModel.Verified = verification.VerificationStatus == "verified"
+
+	return domainModel, nil
+}
+
 // GetByID retrieves an artisan by ID
 func (r *artisanRepository) GetByID(ctx context.Context, id string) (*domain.ArtisanProfile, error) {
 	var dbModel ArtisanDBModel
@@ -119,21 +137,7 @@ func (r *artisanRepository) GetByID(ctx context.Context, id string) (*domain.Art
 		return nil, err
 	}
 
-	// Fetch verification status
-	var verification ArtisanVerificationDBModel
-	if err := r.db.WithContext(ctx).Where("artisan_id = ?", dbModel.ID).First(&verification).Error; err != nil {
-		if !errors.Is(err, gorm.ErrRecordNotFound) {
-			return nil, err
-		}
-		// If no verification record exists, default to unverified
-		verification.VerificationStatus = "unverified"
-	}
-
-	// Convert to domain model and set verified status based on verification table
-	domainModel := toDomainModel(&dbModel)
-	domainModel.Verified = verification.VerificationStatus == "verified"
-
-	return domainModel, nil
+	return r.enrichWithVerificationStatus(ctx, &dbModel)
 }
 
 // GetByArtisanID retrieves an artisan by artisan ID
@@ -147,21 +151,7 @@ func (r *artisanRepository) GetByArtisanID(ctx context.Context, artisanID string
 		return nil, err
 	}
 
-	// Fetch verification status
-	var verification ArtisanVerificationDBModel
-	if err := r.db.WithContext(ctx).Where("artisan_id = ?", dbModel.ID).First(&verification).Error; err != nil {
-		if !errors.Is(err, gorm.ErrRecordNotFound) {
-			return nil, err
-		}
-		// If no verification record exists, default to unverified
-		verification.VerificationStatus = "unverified"
-	}
-
-	// Convert to domain model and set verified status based on verification table
-	domainModel := toDomainModel(&dbModel)
-	domainModel.Verified = verification.VerificationStatus == "verified"
-
-	return domainModel, nil
+	return r.enrichWithVerificationStatus(ctx, &dbModel)
 }
 
 // Update modifies an existing artisan profile
@@ -262,7 +252,7 @@ func toDomainModel(db *ArtisanDBModel) *domain.ArtisanProfile {
 		Rating:             db.Rating,
 		ReviewsCount:       db.ReviewsCount,
 		RatesCount:         db.RatesCount,
-		AvailabilityStatus: db.AvailabilityStatus,
+		AvailabilityStatus: domain.ArtisanAvailabilityUnavailable,
 		//		Verified:               db.Verified,
 		AcceptsGenericRequests: db.AcceptsGenericRequests,
 		MaxTravelDistanceKm:    db.MaxTravelDistanceKm,
