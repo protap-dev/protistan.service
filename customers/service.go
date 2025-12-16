@@ -64,12 +64,22 @@ type CustomerAddress struct {
 	UpdatedAt     time.Time `json:"updated_at"`
 }
 
-// Complete customer profile (user + addresses)
 type CustomerProfile struct {
-	User      user.User         `json:"user"`
+	User      CustomerUserDTO   `json:"user"`
 	Profile   user.UserProfile  `json:"profile"`
 	Settings  user.UserSettings `json:"settings"`
 	Addresses []CustomerAddress `json:"addresses"`
+}
+
+type CustomerUserDTO struct {
+	ID              string    `json:"id"`
+	Email           string    `json:"email"`
+	EmailVerified   bool      `json:"email_verified"`
+	RolesEnabled    []string  `json:"roles_enabled"`
+	ActiveRole      *string   `json:"active_role"`
+	ProfileComplete bool      `json:"profile_complete"`
+	CreatedAt       time.Time `json:"created_at"`
+	UpdatedAt       time.Time `json:"updated_at"`
 }
 
 // ============================================================================
@@ -144,7 +154,16 @@ func (s *Service) GetProfile(ctx context.Context) (*CustomerProfile, error) {
 	}
 
 	return &CustomerProfile{
-		User:      completeProfile.User,
+		User: CustomerUserDTO{
+			ID:              completeProfile.User.ID,
+			Email:           completeProfile.User.Email,
+			EmailVerified:   completeProfile.User.EmailVerified,
+			RolesEnabled:    []string(completeProfile.User.Roles),
+			ActiveRole:      completeProfile.User.ActiveRole, // pointer
+			ProfileComplete: completeProfile.User.ProfileComplete,
+			CreatedAt:       completeProfile.User.CreatedAt,
+			UpdatedAt:       completeProfile.User.UpdatedAt,
+		},
 		Profile:   completeProfile.Profile,
 		Settings:  completeProfile.Settings,
 		Addresses: addresses,

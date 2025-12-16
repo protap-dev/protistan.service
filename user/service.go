@@ -197,67 +197,28 @@ func (s *Service) getProfileResponse(ctx context.Context, userID string) (*UserP
 	var out *UserProfileResponse
 
 	err := s.coreSvc.DB().WithContext(ctx).Transaction(func(tx *gorm.DB) error {
-		userRepo := NewUserRepository(tx)
-		profileRepo := NewProfileRepository(tx)
-		settingsRepo := NewSettingsRepository(tx)
-
-		user, err := userRepo.GetByID(ctx, userID)
+		u, p, st, err := s.getOrCreateUserProfileSettingsTx(ctx, tx, userID)
 		if err != nil {
 			return err
 		}
 
-		profile, err := profileRepo.GetByUserID(ctx, userID)
-		if err != nil {
-			if !errors.Is(err, ErrProfileNotFound) {
-				return err
-			}
-			profile = &UserProfile{UserID: userID}
-			if err := profileRepo.Create(ctx, profile); err != nil {
-				s.logger.LogError(ctx, "create_profile_in_get_profile_response", err)
-				return err
-			}
-		}
+		onboardingState, missing := s.computeOnboardingState(ctx, u, p)
 
-		settings, err := settingsRepo.GetByUserID(ctx, userID)
-		if err != nil {
-			if !errors.Is(err, ErrSettingsNotFound) {
-				return err
-			}
-			settings = &UserSettings{
-				UserID:             userID,
-				EmailNotifications: true,
-				SMSNotifications:   false,
-				PushNotifications:  true,
-				Language:           "en",
-				Timezone:           "Africa/Lagos",
-			}
-			if err := settingsRepo.Create(ctx, settings); err != nil {
-				s.logger.LogError(ctx, "create_settings_in_get_profile_response", err)
-				return err
-			}
-		}
-
-		onboardingState, missing := s.computeOnboardingState(ctx, user, profile)
-
-		// Convert roles (StringArray) to []string for roles_enabled
-		rolesEnabled := []string(user.Roles)
-
-		// ActiveRole is already a *string on the model; just pass it through
 		resp := &UserProfileResponse{
-			Profile:         *profile,
-			Settings:        *settings,
+			Profile:         *p,
+			Settings:        *st,
 			OnboardingState: onboardingState,
 			MissingFields:   missing,
 		}
 
-		resp.User.ID = user.ID
-		resp.User.Email = user.Email
-		resp.User.EmailVerified = user.EmailVerified
-		resp.User.RolesEnabled = rolesEnabled
-		resp.User.ActiveRole = user.ActiveRole
-		resp.User.ProfileComplete = user.ProfileComplete
-		resp.User.CreatedAt = user.CreatedAt
-		resp.User.UpdatedAt = user.UpdatedAt
+		resp.User.ID = u.ID
+		resp.User.Email = u.Email
+		resp.User.EmailVerified = u.EmailVerified
+		resp.User.RolesEnabled = []string(u.Roles)
+		resp.User.ActiveRole = u.ActiveRole
+		resp.User.ProfileComplete = u.ProfileComplete
+		resp.User.CreatedAt = u.CreatedAt
+		resp.User.UpdatedAt = u.UpdatedAt
 
 		out = resp
 		return nil
@@ -569,6 +530,7 @@ func (s *Service) computeOnboardingState(ctx context.Context, user *User, profil
 			Table("customer_addresses").
 			Where("user_id = ?", user.ID).
 			Count(&addressCount).Error; err != nil {
+			s.logger.LogError(ctx, "compute_onboarding_state_customer_address_check", err)
 			// If DB check fails, keep UX safe: require address.
 			return "needs_address", []string{"address"}
 		}
@@ -632,71 +594,77 @@ func contains(list []string, v string) bool {
 func (s *Service) getCompleteProfile(ctx context.Context, userID string) (*CompleteUserProfile, error) {
 	var result *CompleteUserProfile
 
-	// Use a manual transaction because we need to coordinate multiple repositories.
-	// The WithReadTransaction helper is too simple for this use case.
 	err := s.coreSvc.DB().WithContext(ctx).Transaction(func(tx *gorm.DB) error {
-		// Instantiate all repositories with the transaction object `tx`.
-		userRepo := NewUserRepository(tx)
-		profileRepo := NewProfileRepository(tx)
-		settingsRepo := NewSettingsRepository(tx)
-
-		// Fetch user
-		user, err := userRepo.GetByID(ctx, userID)
+		u, p, st, err := s.getOrCreateUserProfileSettingsTx(ctx, tx, userID)
 		if err != nil {
 			return err
 		}
 
-		// Fetch or create profile
-		profile, err := profileRepo.GetByUserID(ctx, userID)
-		if err != nil {
-			if !errors.Is(err, ErrProfileNotFound) {
-				return err // Return actual error if it's not 'Not Found'
-			}
-			// Create default profile if it doesn't exist
-			profile = &UserProfile{UserID: userID}
-			if err := profileRepo.Create(ctx, profile); err != nil {
-				s.logger.LogError(ctx, "create_profile_in_get_complete", err)
-				return err
-			}
-		}
-
-		// Fetch or create settings
-		settings, err := settingsRepo.GetByUserID(ctx, userID)
-		if err != nil {
-			if !errors.Is(err, ErrSettingsNotFound) {
-				return err // Return actual error if it's not 'Not Found'
-			}
-			// Create default settings if they don't exist
-			settings = &UserSettings{
-				UserID:             userID,
-				EmailNotifications: true,
-				SMSNotifications:   false,
-				PushNotifications:  true,
-				Language:           "en",
-				Timezone:           "Africa/Lagos",
-			}
-			if err := settingsRepo.Create(ctx, settings); err != nil {
-				s.logger.LogError(ctx, "create_settings_in_get_complete", err)
-				return err
-			}
-		}
-
-		// Compute onboarding state and missing fields
-		onboardingState, missingFields := s.computeOnboardingState(ctx, user, profile)
+		onboardingState, missingFields := s.computeOnboardingState(ctx, u, p)
 
 		result = &CompleteUserProfile{
-			User:            *user,
-			Profile:         *profile,
-			Settings:        *settings,
+			User:            *u,
+			Profile:         *p,
+			Settings:        *st,
 			OnboardingState: onboardingState,
 			MissingFields:   missingFields,
 		}
-		return nil // Commit the transaction
+		return nil
 	})
-
 	if err != nil {
 		return nil, err
 	}
 
 	return result, nil
+}
+
+func (s *Service) getOrCreateUserProfileSettingsTx(
+	ctx context.Context,
+	tx *gorm.DB,
+	userID string,
+) (*User, *UserProfile, *UserSettings, error) {
+	userRepo := NewUserRepository(tx)
+	profileRepo := NewProfileRepository(tx)
+	settingsRepo := NewSettingsRepository(tx)
+
+	// User must exist
+	u, err := userRepo.GetByID(ctx, userID)
+	if err != nil {
+		return nil, nil, nil, err
+	}
+
+	// Profile: fetch or create
+	p, err := profileRepo.GetByUserID(ctx, userID)
+	if err != nil {
+		if !errors.Is(err, ErrProfileNotFound) {
+			return nil, nil, nil, err
+		}
+		p = &UserProfile{UserID: userID}
+		if err := profileRepo.Create(ctx, p); err != nil {
+			s.logger.LogError(ctx, "create_profile_in_get_or_create", err)
+			return nil, nil, nil, err
+		}
+	}
+
+	// Settings: fetch or create
+	st, err := settingsRepo.GetByUserID(ctx, userID)
+	if err != nil {
+		if !errors.Is(err, ErrSettingsNotFound) {
+			return nil, nil, nil, err
+		}
+		st = &UserSettings{
+			UserID:             userID,
+			EmailNotifications: true,
+			SMSNotifications:   false,
+			PushNotifications:  true,
+			Language:           "en",
+			Timezone:           "Africa/Lagos",
+		}
+		if err := settingsRepo.Create(ctx, st); err != nil {
+			s.logger.LogError(ctx, "create_settings_in_get_or_create", err)
+			return nil, nil, nil, err
+		}
+	}
+
+	return u, p, st, nil
 }
