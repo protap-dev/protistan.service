@@ -45,7 +45,7 @@ func Test_EmailVerificationFlow(t *testing.T) {
 			WillReturnRows(sqlmock.NewRows([]string{"id"}).AddRow("refresh-token-id"))
 		mock.ExpectCommit()
 
-		regReq := &RegisterRequest{Email: email, Password: password, UserType: "customer"}
+		regReq := &RegisterRequest{Email: email, Password: password}
 		regResp, err := svc.Register(ctx, regReq)
 		require.NoError(t, err)
 		assert.NotEmpty(t, regResp.Token)

@@ -61,6 +61,7 @@ type BookingRepository interface {
 
 	// Offer methods
 	FindExpiredOffers(ctx context.Context) ([]*BookingOffer, error)
+	GetArtisanAvailability(ctx context.Context, artisanID string) (string, error)
 	UpdateOffer(ctx context.Context, offer *BookingOffer) error
 	CreateOfferExpiredEventInOutbox(ctx context.Context, event *BookingEvent) error
 

@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"encore.app/booking/domain"
+	"encore.app/booking/events"
 	"encore.app/booking/relay"
 	corerelay "encore.app/core/relay"
 	"encore.app/core/repository"
@@ -254,10 +255,12 @@ func TestPublisherTopicRouting(t *testing.T) {
 
 		// Create a mock booking event
 		bookingEvent := relay.BookingEvent{
-			BookingEvent: domain.BookingEvent{
-				BookingID: "test-booking",
-				Status:    domain.BookingStatus("pending"),
-				UserID:    "test-user",
+			EventEnvelope: events.EventEnvelope[domain.BookingEvent]{
+				Data: domain.BookingEvent{
+					BookingID: "test-booking",
+					Status:    domain.BookingStatus("pending"),
+					UserID:    "test-user",
+				},
 			},
 		}
 

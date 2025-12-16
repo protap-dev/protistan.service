@@ -119,9 +119,10 @@ func (h *SearchHandler) convertSearchResults(results []domain.SearchResult) []Ar
 		responseResults[i] = ArtisanSearchResult{
 			Artisan: result.Artisan,
 			User: domain.UserData{
-				ID:       result.User.ID,
-				Email:    result.User.Email,
-				UserType: result.User.UserType,
+				ID:         result.User.ID,
+				Email:      result.User.Email,
+				Roles:      result.User.Roles,
+				ActiveRole: result.User.ActiveRole,
 			},
 			Profile: domain.ProfileData{
 				FirstName: result.Profile.FirstName,

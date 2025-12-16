@@ -41,7 +41,7 @@ func ValidateCustomerRole(ctx context.Context, userID string, logger ServiceLogg
 		})
 		return fmt.Errorf("failed to validate user: %w", err)
 	}
-	if u.UserType != "customer" {
+	if u.ActiveRole != "customer" {
 		return errors.New("only customers can create bookings")
 	}
 	if !u.ProfileComplete {
@@ -49,7 +49,7 @@ func ValidateCustomerRole(ctx context.Context, userID string, logger ServiceLogg
 	}
 	logger.Info(ctx, "customer role validation successful", map[string]any{
 		"user_id":          userID,
-		"user_type":        u.UserType,
+		"user_role":        u.ActiveRole,
 		"profile_complete": u.ProfileComplete,
 	})
 	return nil

@@ -11,14 +11,16 @@ CREATE TABLE users (
     email VARCHAR(255) UNIQUE NOT NULL,
     password_hash VARCHAR(255) NOT NULL,
     email_verified BOOLEAN DEFAULT FALSE,
-    user_type VARCHAR(20) DEFAULT 'customer',
+    roles TEXT[] NOT NULL DEFAULT '{}',
+    active_role TEXT NULL,
     profile_complete BOOLEAN DEFAULT FALSE,
     created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
     updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
     failed_login_attempts INTEGER DEFAULT 0,
     locked_until TIMESTAMP WITH TIME ZONE,
     last_failed_login TIMESTAMP WITH TIME ZONE,
-    CONSTRAINT check_user_type CHECK (user_type IN ('customer', 'artisan', 'admin'))
+    CONSTRAINT check_roles_elements CHECK (roles <@ ARRAY['customer', 'artisan', 'admin']::text[]),
+    CONSTRAINT check_active_role_valid CHECK (active_role IN ('customer', 'artisan', 'admin'))
 );
 
 -- ============================================================================

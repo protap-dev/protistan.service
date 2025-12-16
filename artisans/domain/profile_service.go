@@ -141,6 +141,7 @@ func (s *ProfileService) CreateProfile(ctx context.Context, userCtx *internal.Us
 				Verified:            false,
 				Rating:              0.0,
 				ReviewsCount:        0,
+				AvailabilityStatus:  "unavailable",
 			}
 
 			if err := txRepo.Create(ctx, artisan); err != nil {
@@ -151,9 +152,10 @@ func (s *ProfileService) CreateProfile(ctx context.Context, userCtx *internal.Us
 		// 4. Build complete response
 		result = &CompleteProfile{
 			User: UserData{
-				ID:       completeProfile.User.ID,
-				Email:    completeProfile.User.Email,
-				UserType: completeProfile.User.UserType,
+				ID:         completeProfile.User.ID,
+				Email:      completeProfile.User.Email,
+				Roles:      completeProfile.User.Roles,
+				ActiveRole: completeProfile.User.ActiveRole,
 			},
 			Profile: ProfileData{
 				FirstName: completeProfile.Profile.FirstName,
@@ -247,6 +249,57 @@ func (s *ProfileService) UpdateProfile(ctx context.Context, userCtx *internal.Us
 	return result, nil
 }
 
+// UpdateAvailability updates the artisan's availability status
+func (s *ProfileService) UpdateAvailability(ctx context.Context, userCtx *internal.UserContext, status string) (*ArtisanProfile, error) {
+	if status != ArtisanAvailabilityAvailable && status != ArtisanAvailabilityUnavailable {
+		return nil, fmt.Errorf("invalid status: %s", status)
+	}
+
+	var result *ArtisanProfile
+
+	err := s.repo.WithTransaction(ctx, func(txRepo ArtisanRepository) error {
+		// 1. Verify user is an artisan
+		_, err := s.verifyArtisanUser(ctx, userCtx.UUID)
+		if err != nil {
+			return err
+		}
+
+		// 2. Get existing profile
+		existing, err := txRepo.GetByID(ctx, userCtx.ID)
+		if err != nil {
+			if errors.Is(err, ErrNotFound) {
+				return internal.ErrArtisanNotFound
+			}
+			return internal.ErrDatabaseError
+		}
+
+		// 3. Update status
+		updates := map[string]any{
+			"availability_status": status,
+		}
+
+		if err := txRepo.Update(ctx, existing.ID, updates); err != nil {
+			return internal.ErrDatabaseError
+		}
+
+		// 4. Reload updated profile
+		result, err = txRepo.GetByArtisanID(ctx, existing.ID)
+		if err != nil {
+			return internal.ErrDatabaseError
+		}
+
+		return nil
+	})
+
+	if err != nil {
+		s.logger.LogError(ctx, "update_availability_failed", err)
+		return nil, err
+	}
+
+	s.logger.LogArtisanAction(ctx, "availability_updated", result.ID, userCtx.ID)
+	return result, nil
+}
+
 // GetPublicArtisanProfile retrieves public artisan profile information by ID (no auth required)
 func (s *ProfileService) GetPublicArtisanProfile(ctx context.Context, artisanID string) (*PublicArtisanProfile, error) {
 	var result *PublicArtisanProfile
@@ -285,6 +338,7 @@ func (s *ProfileService) GetPublicArtisanProfile(ctx context.Context, artisanID 
 			PreferredCountry:    artisan.PreferredCountry,
 			UserFirstName:       userProfile.FirstName,
 			UserLastName:        userProfile.LastName,
+			AvailabilityStatus:  artisan.AvailabilityStatus,
 		}
 
 		return nil // Transaction will commit
@@ -359,9 +413,10 @@ func (s *ProfileService) GetProfile(ctx context.Context, userCtx *internal.UserC
 		// 3. Build complete response within transaction
 		result = &CompleteProfile{
 			User: UserData{
-				ID:       completeProfile.User.ID,
-				Email:    completeProfile.User.Email,
-				UserType: completeProfile.User.UserType,
+				ID:         completeProfile.User.ID,
+				Email:      completeProfile.User.Email,
+				Roles:      completeProfile.User.Roles,
+				ActiveRole: completeProfile.User.ActiveRole,
 			},
 			Profile: ProfileData{
 				FirstName: completeProfile.Profile.FirstName,
@@ -396,7 +451,7 @@ func (s *ProfileService) verifyArtisanUser(ctx context.Context, userUUID uuid.UU
 		return nil, internal.ErrUnauthorizedAction
 	}
 
-	if completeProfile.User.UserType != "artisan" {
+	if completeProfile.User.ActiveRole != "artisan" {
 		return nil, internal.ErrUnauthorizedAction
 	}
 
@@ -443,6 +498,7 @@ func (s *ProfileService) createNew(ctx context.Context, input *CreateProfileInpu
 		Verified:            false,
 		Rating:              0.0,
 		ReviewsCount:        0,
+		AvailabilityStatus:  ArtisanAvailabilityUnavailable,
 	}
 
 	if err := s.repo.Create(ctx, artisan); err != nil {

@@ -1,27 +1,72 @@
 package auth
 
 import (
+	"database/sql/driver"
+	"fmt"
+	"strings"
 	"time"
 
 	"github.com/golang-jwt/jwt/v5"
 )
 
+// StringArray is a custom type for scanning string arrays from the database.
+type StringArray []string
+
+// Scan implements the sql.Scanner interface for StringArray.
+func (a *StringArray) Scan(value interface{}) error {
+	if value == nil {
+		*a = nil
+		return nil
+	}
+	sv, err := driver.String.ConvertValue(value)
+	if err != nil {
+		return fmt.Errorf("failed to scan StringArray: %v", err)
+	}
+	s, ok := sv.(string)
+	if !ok {
+		return fmt.Errorf("failed to scan StringArray: expected string, got %T", sv)
+	}
+
+	s = strings.Trim(s, "{}")
+	if s == "" {
+		*a = []string{}
+		return nil
+	}
+	parts := strings.Split(s, ",")
+	*a = StringArray(parts)
+	return nil
+}
+
+// Value implements the driver.Valuer interface for StringArray.
+func (a StringArray) Value() (driver.Value, error) {
+	if a == nil {
+		return nil, nil
+	}
+	if len(a) == 0 {
+		return "{}", nil
+	}
+	return fmt.Sprintf("{%s}", strings.Join(a, ",")), nil
+}
+
 // UserData returned by auth handler
 type UserData struct {
-	ID    string `json:"id"`
-	Email string `json:"email"`
+	ID         string   `json:"id"`
+	Email      string   `json:"email"`
+	Roles      []string `json:"roles"`
+	ActiveRole *string  `json:"active_role"`
 }
 
 // User represents a user in the database
 type User struct {
-	ID              string    `json:"id" gorm:"primarykey;type:uuid;default:generate_uuid()"`
-	Email           string    `json:"email" gorm:"index;not null;type:varchar(255)"`
-	PasswordHash    string    `json:"password_hash" gorm:"not null;type:varchar(255)"`
-	EmailVerified   bool      `json:"email_verified" gorm:"default:false"`
-	UserType        string    `json:"user_type" gorm:"default:'customer'"`
-	ProfileComplete bool      `json:"profile_complete" gorm:"default:false"`
-	CreatedAt       time.Time `json:"created_at" gorm:"autoCreateTime"`
-	UpdatedAt       time.Time `json:"updated_at" gorm:"autoUpdateTime"`
+	ID              string      `json:"id" gorm:"primarykey;type:uuid;default:generate_uuid()"`
+	Email           string      `json:"email" gorm:"index;not null;type:varchar(255)"`
+	PasswordHash    string      `json:"password_hash" gorm:"not null;type:varchar(255)"`
+	EmailVerified   bool        `json:"email_verified" gorm:"default:false"`
+	Roles           StringArray `json:"roles" gorm:"type:text[];default:'{}'"`
+	ActiveRole      *string     `json:"active_role"`
+	ProfileComplete bool        `json:"profile_complete" gorm:"default:false"`
+	CreatedAt       time.Time   `json:"created_at" gorm:"autoCreateTime"`
+	UpdatedAt       time.Time   `json:"updated_at" gorm:"autoUpdateTime"`
 }
 
 // EmailVerificationToken represents an email verification token in the database
@@ -69,10 +114,11 @@ type PasswordResetToken struct {
 
 // JWTClaims holds custom JWT claims.
 type JWTClaims struct {
-	UserID          string `json:"user_id"`
-	Email           string `json:"email"`
-	UserType        string `json:"user_type"`
-	ProfileComplete bool   `json:"profile_complete"`
+	UserID          string   `json:"user_id"`
+	Email           string   `json:"email"`
+	Roles           []string `json:"roles"`
+	ActiveRole      string   `json:"active_role"`
+	ProfileComplete bool     `json:"profile_complete"`
 	jwt.RegisteredClaims
 }
 
@@ -80,7 +126,6 @@ type JWTClaims struct {
 type RegisterRequest struct {
 	Email    string `json:"email"`
 	Password string `json:"password"`
-	UserType string `json:"user_type"`
 }
 
 type AuthResponse struct {

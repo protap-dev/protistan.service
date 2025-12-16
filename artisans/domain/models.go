@@ -7,6 +7,11 @@ import (
 	"time"
 )
 
+const (
+	ArtisanAvailabilityAvailable   = "available"
+	ArtisanAvailabilityUnavailable = "unavailable"
+)
+
 // StringArray is a custom type for scanning string arrays from the database.
 type StringArray []string
 
@@ -66,6 +71,8 @@ type ArtisanProfile struct {
 	Languages              StringArray `gorm:"type:text[]"`
 	Rating                 float64
 	ReviewsCount           int
+	RatesCount             int
+	AvailabilityStatus     string
 	Verified               bool
 	AcceptsGenericRequests bool
 	MaxTravelDistanceKm    float64
@@ -88,9 +95,10 @@ type ArtisanService struct {
 
 // UserData represents user information from the user service
 type UserData struct {
-	ID       string `json:"id"`
-	Email    string `json:"email"`
-	UserType string `json:"user_type"`
+	ID         string   `json:"id"`
+	Email      string   `json:"email"`
+	Roles      []string `json:"roles"`
+	ActiveRole string   `json:"active_role"`
 }
 
 // ProfileData represents profile information from the user service
@@ -124,8 +132,9 @@ type PublicArtisanProfile struct {
 	PreferredCountry       string           `json:"preferred_country"`
 	Services               []ArtisanService `json:"services"`
 	// User info (public only)
-	UserFirstName string `json:"user_first_name"`
-	UserLastName  string `json:"user_last_name"`
+	UserFirstName      string `json:"user_first_name"`
+	UserLastName       string `json:"user_last_name"`
+	AvailabilityStatus string `json:"availability_status"`
 }
 
 // CompleteProfile aggregates user and artisan data
@@ -166,10 +175,10 @@ type UpdateProfileInput struct {
 
 // ArtisanSearchResult represents a single artisan in search results.
 type ArtisanSearchResult struct {
-	Artisan   *PublicArtisanProfile `json:"artisan"`
-	User      *UserData             `json:"user"`
-	Profile   *ProfileData          `json.source:"profile"`
-	Distance  float64               `json:"distance_km"`
-	Rank      float64               `json:"rank"`
-	Services  []ArtisanService      `json:"services,omitempty"`
+	Artisan  *PublicArtisanProfile `json:"artisan"`
+	User     *UserData             `json:"user"`
+	Profile  *ProfileData          `json.source:"profile"`
+	Distance float64               `json:"distance_km"`
+	Rank     float64               `json:"rank"`
+	Services []ArtisanService      `json:"services,omitempty"`
 }
