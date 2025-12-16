@@ -192,7 +192,7 @@ func Test_generateJWT(t *testing.T) {
 		userID := "test-user-id"
 		email := "test@example.com"
 
-		token, err := svc.generateJWT(userID, email, "customer", false)
+		token, err := svc.generateJWT(userID, email, StringArray{"customer"}, Ptr("customer"), false)
 		require.NoError(t, err)
 		assert.NotEmpty(t, token)
 
@@ -204,7 +204,7 @@ func Test_generateJWT(t *testing.T) {
 	})
 
 	t.Run("token expires after 30 minutes", func(t *testing.T) {
-		token, err := svc.generateJWT("user-id", "test@example.com", "customer", false)
+		token, err := svc.generateJWT("user-id", "test@example.com", StringArray{"customer"}, Ptr("customer"), false)
 		require.NoError(t, err)
 
 		claims, err := parseJWT(token)
@@ -221,7 +221,7 @@ func Test_parseJWT(t *testing.T) {
 	defer cleanup()
 
 	t.Run("valid token", func(t *testing.T) {
-		token, _ := svc.generateJWT("user-123", "user@example.com", "customer", false)
+		token, _ := svc.generateJWT("user-123", "user@example.com", StringArray{"customer"}, Ptr("customer"), false)
 		claims, err := parseJWT(token)
 		require.NoError(t, err)
 		assert.Equal(t, "user-123", claims.UserID)
@@ -269,7 +269,7 @@ func Test_AuthHandler(t *testing.T) {
 	ctx := context.Background()
 
 	t.Run("valid token", func(t *testing.T) {
-		token, _ := svc.generateJWT("user-123", "user@example.com", "artisan", false)
+		token, _ := svc.generateJWT("user-123", "user@example.com", StringArray{"artisan"}, Ptr("artisan"), false)
 		uid, userData, err := svc.AuthHandler(ctx, token)
 		require.NoError(t, err)
 		assert.Equal(t, "user-123", string(uid))
@@ -322,7 +322,7 @@ func Test_Register(t *testing.T) {
 			WillReturnRows(sqlmock.NewRows([]string{"id"}).AddRow("refresh-token-id"))
 		mock.ExpectCommit()
 
-		req := &RegisterRequest{Email: email, Password: password, UserType: "customer"}
+		req := &RegisterRequest{Email: email, Password: password}
 		resp, err := svc.Register(ctx, req)
 
 		require.NoError(t, err)
@@ -342,7 +342,7 @@ func Test_Register(t *testing.T) {
 			WillReturnRows(sqlmock.NewRows([]string{"id", "email"}).
 				AddRow("existing-id", email))
 
-		req := &RegisterRequest{Email: email, Password: "SecureP!ss123", UserType: "customer"}
+		req := &RegisterRequest{Email: email, Password: "SecureP!ss123"}
 		_, err := svc.Register(ctx, req)
 
 		assert.Error(t, err)
@@ -354,7 +354,7 @@ func Test_Register(t *testing.T) {
 		svc, _, cleanup := setupTestService(t)
 		defer cleanup()
 
-		req := &RegisterRequest{Email: "invalid-email", Password: "SecureP!ss123", UserType: "customer"}
+		req := &RegisterRequest{Email: "invalid-email", Password: "SecureP!ss123"}
 		_, err := svc.Register(ctx, req)
 
 		assert.Error(t, err)
@@ -369,7 +369,7 @@ func Test_Register(t *testing.T) {
 			WithArgs("user@example.com", 1).
 			WillReturnError(gorm.ErrRecordNotFound)
 
-		req := &RegisterRequest{Email: "user@example.com", Password: "weak", UserType: "customer"}
+		req := &RegisterRequest{Email: "user@example.com", Password: "weak"}
 		_, err := svc.Register(ctx, req)
 
 		assert.Error(t, err)
@@ -392,7 +392,7 @@ func Test_Register(t *testing.T) {
 
 		for _, tt := range tests {
 			t.Run(tt.name, func(t *testing.T) {
-				req := &RegisterRequest{Email: tt.email, Password: tt.pass, UserType: "customer"}
+				req := &RegisterRequest{Email: tt.email, Password: tt.pass}
 				_, err := svc.Register(ctx, req)
 				assert.Error(t, err)
 			})
@@ -431,7 +431,7 @@ func Test_Register(t *testing.T) {
 			WillReturnRows(sqlmock.NewRows([]string{"id"}).AddRow("refresh-token-id"))
 		mock.ExpectCommit()
 
-		req := &RegisterRequest{Email: email, Password: "SecureP!ss123", UserType: "customer"}
+		req := &RegisterRequest{Email: email, Password: "SecureP!ss123"}
 		_, err := svc.Register(ctx, req)
 
 		require.NoError(t, err)
@@ -446,7 +446,7 @@ func Test_Register(t *testing.T) {
 			WithArgs("user@example.com", 1).
 			WillReturnError(errors.New("database connection error"))
 
-		req := &RegisterRequest{Email: "user@example.com", Password: "SecureP!ss123", UserType: "customer"}
+		req := &RegisterRequest{Email: "user@example.com", Password: "SecureP!ss123"}
 		_, err := svc.Register(ctx, req)
 
 		assert.Error(t, err)
@@ -466,7 +466,7 @@ func Test_Register(t *testing.T) {
 			WillReturnError(errors.New("insert failed"))
 		mock.ExpectRollback()
 
-		req := &RegisterRequest{Email: "user@example.com", Password: "SecureP!ss123", UserType: "customer"}
+		req := &RegisterRequest{Email: "user@example.com", Password: "SecureP!ss123"}
 		_, err := svc.Register(ctx, req)
 
 		assert.Error(t, err)
@@ -478,7 +478,7 @@ func Test_Register(t *testing.T) {
 		defer cleanup()
 
 		email := "ratelimit@example.com"
-		req := &RegisterRequest{Email: email, Password: "SecureP!ss123", UserType: "customer"}
+		req := &RegisterRequest{Email: email, Password: "SecureP!ss123"}
 
 		for i := 0; i < 3; i++ {
 			svc.rateLimiter.isAllowed("register:"+email, 3) // ✅ Fixed: use isAllowed method
@@ -1711,3 +1711,9 @@ func Test_Refresh(t *testing.T) {
 		assert.Contains(t, err.Error(), "invalid request")
 	})
 }
+
+// Ptr returns a pointer to the given value.
+func Ptr[T any](v T) *T {
+	return &v
+}
+

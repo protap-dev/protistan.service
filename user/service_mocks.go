@@ -61,13 +61,13 @@ func (m *mockUserRepository) UpdateProfileComplete(ctx context.Context, id strin
 
 // Mock ProfileRepository
 type mockProfileRepository struct {
-	profiles map[string]*UserProfile
+	profiles         map[string]*UserProfile
 	shouldFailCreate bool
 }
 
 func NewMockProfileRepository() *mockProfileRepository {
 	return &mockProfileRepository{
-		profiles: make(map[string]*UserProfile),
+		profiles:         make(map[string]*UserProfile),
 		shouldFailCreate: false,
 	}
 }
@@ -146,9 +146,9 @@ func (m *mockSettingsRepository) Upsert(ctx context.Context, settings *UserSetti
 
 // Mock UserValidator
 type mockUserValidator struct {
-	validateNameFunc   func(name string, maxLength int) error
-	validatePhoneFunc  func(phone string) error
-	validateEmailFunc  func(email string) error
+	validateNameFunc     func(name string, maxLength int) error
+	validatePhoneFunc    func(phone string) error
+	validateEmailFunc    func(email string) error
 	validatePasswordFunc func(password string) []string
 }
 
@@ -243,14 +243,14 @@ func createTestService() (*Service, *mockUserRepository, *mockProfileRepository,
 // Helper function to create test data
 func createTestUser(userID string) *User {
 	return &User{
-		ID:             userID,
-		Email:          "test@example.com",
-		PasswordHash:   "hashed_password",
-		EmailVerified:  true,
-		UserType:       "customer",
+		ID:              userID,
+		Email:           "test@example.com",
+		PasswordHash:    "hashed_password",
+		EmailVerified:   true,
+		ActiveRole:      "customer",
 		ProfileComplete: false,
-		CreatedAt:      time.Now(),
-		UpdatedAt:      time.Now(),
+		CreatedAt:       time.Now(),
+		UpdatedAt:       time.Now(),
 	}
 }
 

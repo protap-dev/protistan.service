@@ -31,7 +31,7 @@ func (s *Service) AuthHandler(ctx context.Context, token string) (auth.UID, *Use
 	if err != nil {
 		return "", nil, errs.B().Msg("unauthorized: invalid token").Err()
 	}
-	return auth.UID(claims.UserID), &UserData{ID: claims.UserID, Email: claims.Email}, nil
+	return auth.UID(claims.UserID), &UserData{ID: claims.UserID, Email: claims.Email, Roles: claims.Roles, ActiveRole: &claims.ActiveRole}, nil
 }
 
 func initService() (*Service, error) {
@@ -84,10 +84,10 @@ func (s *Service) Register(ctx context.Context, req *RegisterRequest) (*AuthResp
 	}
 
 	// Sanitize and validate user_type
-	userType := strings.ToLower(strings.TrimSpace(req.UserType))
-	if err := ValidateUserType(userType); err != nil {
-		return nil, err
-	}
+	// userType := strings.ToLower(strings.TrimSpace(req.UserType))
+	// if err := ValidateUserType(userType); err != nil {
+	// 	return nil, err
+	// }
 
 	// Check if user already exists
 	var existingUser User
@@ -110,11 +110,13 @@ func (s *Service) Register(ctx context.Context, req *RegisterRequest) (*AuthResp
 
 	// Create new user
 	newUser := User{
-		Email:           normalizedEmail,
-		PasswordHash:    string(hashedPassword),
-		EmailVerified:   false,
-		UserType:        userType,
-		ProfileComplete: userType == "customer",
+		Email:         normalizedEmail,
+		PasswordHash:  string(hashedPassword),
+		EmailVerified: false,
+		// UserType:        userType,
+		Roles:           StringArray{},
+		ActiveRole:      nil,
+		ProfileComplete: false,
 	}
 
 	if err := s.db.Create(&newUser).Error; err != nil {
@@ -122,7 +124,7 @@ func (s *Service) Register(ctx context.Context, req *RegisterRequest) (*AuthResp
 	}
 
 	// Generate JWT token
-	token, err := s.generateJWT(newUser.ID, newUser.Email, newUser.UserType, newUser.ProfileComplete)
+	token, err := s.generateJWT(newUser.ID, newUser.Email, newUser.Roles, newUser.ActiveRole, newUser.ProfileComplete)
 	if err != nil {
 		return nil, errs.B().Msg("failed to generate token").Err()
 	}
@@ -167,7 +169,7 @@ func (s *Service) Login(ctx context.Context, req *LoginRequest) (*AuthResponse, 
 	}
 
 	// Generate JWT token
-	token, err := s.generateJWT(user.ID, user.Email, user.UserType, user.ProfileComplete)
+	token, err := s.generateJWT(user.ID, user.Email, user.Roles, user.ActiveRole, user.ProfileComplete)
 	if err != nil {
 		return nil, errs.B().Msg("failed to generate token").Err()
 	}
@@ -197,7 +199,7 @@ func (s *Service) Refresh(ctx context.Context, req *RefreshRequest) (*AuthRespon
 	}
 
 	// Generate new access token
-	newAccessToken, err := s.generateJWT(user.ID, user.Email, user.UserType, user.ProfileComplete)
+	newAccessToken, err := s.generateJWT(user.ID, user.Email, user.Roles, user.ActiveRole, user.ProfileComplete)
 	if err != nil {
 		return nil, errs.B().Msg("failed to generate token").Err()
 	}

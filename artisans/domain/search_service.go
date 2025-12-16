@@ -154,7 +154,7 @@ func (s *SearchService) executeSearchQuery(ctx context.Context, input *SearchInp
 
 	selectFields := `
 		a.*,
-		u.email, u.user_type, u.email_verified, u.profile_complete, u.created_at as user_created_at, u.updated_at as user_updated_at,
+		u.email, u.roles, u.active_role, u.email_verified, u.profile_complete, u.created_at as user_created_at, u.updated_at as user_updated_at,
 		up.first_name, up.last_name, up.phone, up.avatar_url as user_avatar_url
 	`
 
@@ -229,17 +229,18 @@ func (s *SearchService) executeSearchQuery(ctx context.Context, input *SearchInp
 	// Execute query
 	var results []struct {
 		ArtisanProfile
-		UserEmail           string    `gorm:"column:email"`
-		UserType            string    `gorm:"column:user_type"`
-		UserEmailVerified   bool      `gorm:"column:email_verified"`
-		UserProfileComplete bool      `gorm:"column:profile_complete"`
-		UserCreatedAt       time.Time `gorm:"column:user_created_at"`
-		UserUpdatedAt       time.Time `gorm:"column:user_updated_at"`
-		UserFirstName       string    `gorm:"column:first_name"`
-		UserLastName        string    `gorm:"column:last_name"`
-		UserPhone           string    `gorm:"column:phone"`
-		UserAvatarURL       string    `gorm:"column:user_avatar_url"`
-		Rank                float64   `gorm:"column:rank"`
+		UserEmail           string      `gorm:"column:email"`
+		UserRoles           StringArray `gorm:"column:roles;type:text[]"`
+		UserActiveRole      string      `gorm:"column:active_role"`
+		UserEmailVerified   bool        `gorm:"column:email_verified"`
+		UserProfileComplete bool        `gorm:"column:profile_complete"`
+		UserCreatedAt       time.Time   `gorm:"column:user_created_at"`
+		UserUpdatedAt       time.Time   `gorm:"column:user_updated_at"`
+		UserFirstName       string      `gorm:"column:first_name"`
+		UserLastName        string      `gorm:"column:last_name"`
+		UserPhone           string      `gorm:"column:phone"`
+		UserAvatarURL       string      `gorm:"column:user_avatar_url"`
+		Rank                float64     `gorm:"column:rank"`
 	}
 
 	if err := query.Find(&results).Error; err != nil {
@@ -254,7 +255,8 @@ func (s *SearchService) executeSearchQuery(ctx context.Context, input *SearchInp
 			User: user.User{
 				ID:              result.UserID,
 				Email:           result.UserEmail,
-				UserType:        result.UserType,
+				Roles:           user.StringArray(result.UserRoles),
+				ActiveRole:      result.UserActiveRole,
 				EmailVerified:   result.UserEmailVerified,
 				ProfileComplete: result.UserProfileComplete,
 				CreatedAt:       result.UserCreatedAt,

@@ -151,9 +151,10 @@ func (s *ProfileService) CreateProfile(ctx context.Context, userCtx *internal.Us
 		// 4. Build complete response
 		result = &CompleteProfile{
 			User: UserData{
-				ID:       completeProfile.User.ID,
-				Email:    completeProfile.User.Email,
-				UserType: completeProfile.User.UserType,
+				ID:         completeProfile.User.ID,
+				Email:      completeProfile.User.Email,
+				Roles:      completeProfile.User.Roles,
+				ActiveRole: completeProfile.User.ActiveRole,
 			},
 			Profile: ProfileData{
 				FirstName: completeProfile.Profile.FirstName,
@@ -359,9 +360,10 @@ func (s *ProfileService) GetProfile(ctx context.Context, userCtx *internal.UserC
 		// 3. Build complete response within transaction
 		result = &CompleteProfile{
 			User: UserData{
-				ID:       completeProfile.User.ID,
-				Email:    completeProfile.User.Email,
-				UserType: completeProfile.User.UserType,
+				ID:         completeProfile.User.ID,
+				Email:      completeProfile.User.Email,
+				Roles:      completeProfile.User.Roles,
+				ActiveRole: completeProfile.User.ActiveRole,
 			},
 			Profile: ProfileData{
 				FirstName: completeProfile.Profile.FirstName,
@@ -396,7 +398,7 @@ func (s *ProfileService) verifyArtisanUser(ctx context.Context, userUUID uuid.UU
 		return nil, internal.ErrUnauthorizedAction
 	}
 
-	if completeProfile.User.UserType != "artisan" {
+	if completeProfile.User.ActiveRole != "artisan" {
 		return nil, internal.ErrUnauthorizedAction
 	}
 

@@ -88,9 +88,10 @@ type ArtisanService struct {
 
 // UserData represents user information from the user service
 type UserData struct {
-	ID       string `json:"id"`
-	Email    string `json:"email"`
-	UserType string `json:"user_type"`
+	ID         string   `json:"id"`
+	Email      string   `json:"email"`
+	Roles      []string `json:"roles"`
+	ActiveRole string   `json:"active_role"`
 }
 
 // ProfileData represents profile information from the user service
@@ -166,10 +167,10 @@ type UpdateProfileInput struct {
 
 // ArtisanSearchResult represents a single artisan in search results.
 type ArtisanSearchResult struct {
-	Artisan   *PublicArtisanProfile `json:"artisan"`
-	User      *UserData             `json:"user"`
-	Profile   *ProfileData          `json.source:"profile"`
-	Distance  float64               `json:"distance_km"`
-	Rank      float64               `json:"rank"`
-	Services  []ArtisanService      `json:"services,omitempty"`
+	Artisan  *PublicArtisanProfile `json:"artisan"`
+	User     *UserData             `json:"user"`
+	Profile  *ProfileData          `json.source:"profile"`
+	Distance float64               `json:"distance_km"`
+	Rank     float64               `json:"rank"`
+	Services []ArtisanService      `json:"services,omitempty"`
 }

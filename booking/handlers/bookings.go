@@ -592,7 +592,7 @@ func (h *BookingsHandler) getUserRole(ctx context.Context, userID string) (strin
 		})
 		return "", fmt.Errorf("failed to get user role: %w", err)
 	}
-	return u.UserType, nil
+	return u.ActiveRole, nil
 }
 
 func (h *BookingsHandler) toResponse(booking *domain.Booking) *BookingResponse {

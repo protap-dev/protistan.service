@@ -39,3 +39,11 @@ func generateSecureToken(length int) (string, error) {
 	}
 	return hex.EncodeToString(b), nil
 }
+
+// derefOrEmpty safely dereferences a string pointer, returning an empty string if it's nil.
+func derefOrEmpty(s *string) string {
+	if s == nil {
+		return ""
+	}
+	return *s
+}

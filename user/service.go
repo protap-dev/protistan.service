@@ -2,7 +2,10 @@ package user
 
 import (
 	"context"
+	"database/sql/driver"
 	"errors"
+	"fmt"
+	"strings"
 	"time"
 
 	"encore.app/core"
@@ -13,6 +16,45 @@ import (
 	"gorm.io/driver/postgres"
 	"gorm.io/gorm"
 )
+
+// StringArray is a custom type for scanning string arrays from the database.
+type StringArray []string
+
+// Scan implements the sql.Scanner interface for StringArray.
+func (a *StringArray) Scan(value interface{}) error {
+	if value == nil {
+		*a = nil
+		return nil
+	}
+	sv, err := driver.String.ConvertValue(value)
+	if err != nil {
+		return fmt.Errorf("failed to scan StringArray: %v", err)
+	}
+	s, ok := sv.(string)
+	if !ok {
+		return fmt.Errorf("failed to scan StringArray: expected string, got %T", sv)
+	}
+
+	s = strings.Trim(s, "{}")
+	if s == "" {
+		*a = []string{}
+		return nil
+	}
+	parts := strings.Split(s, ",")
+	*a = StringArray(parts)
+	return nil
+}
+
+// Value implements the driver.Valuer interface for StringArray.
+func (a StringArray) Value() (driver.Value, error) {
+	if a == nil {
+		return nil, nil
+	}
+	if len(a) == 0 {
+		return "{}", nil
+	}
+	return fmt.Sprintf("{%s}", strings.Join(a, ",")), nil
+}
 
 // Global variable to allow testing override of auth.UserID
 var authUserID func() (string, bool) = func() (string, bool) {
@@ -60,17 +102,18 @@ func initService() (*Service, error) {
 // ============================================================================
 
 type User struct {
-	ID                  string     `json:"id" gorm:"primarykey;type:uuid;default:generate_uuid()"`
-	Email               string     `json:"email"`
-	PasswordHash        string     `json:"-" gorm:"column:password_hash"`
-	EmailVerified       bool       `json:"email_verified"`
-	UserType            string     `json:"user_type"`
-	ProfileComplete     bool       `json:"profile_complete"`
-	CreatedAt           time.Time  `json:"created_at"`
-	UpdatedAt           time.Time  `json:"updated_at"`
-	FailedLoginAttempts int        `json:"-"`
-	LockedUntil         *time.Time `json:"-"`
-	LastFailedLogin     *time.Time `json:"-"`
+	ID                  string      `json:"id" gorm:"primarykey;type:uuid;default:generate_uuid()"`
+	Email               string      `json:"email"`
+	PasswordHash        string      `json:"-" gorm:"column:password_hash"`
+	EmailVerified       bool        `json:"email_verified"`
+	Roles               StringArray `json:"roles" gorm:"type:text[];default:'{}'"`
+	ActiveRole          string      `json:"active_role"`
+	ProfileComplete     bool        `json:"profile_complete"`
+	CreatedAt           time.Time   `json:"created_at"`
+	UpdatedAt           time.Time   `json:"updated_at"`
+	FailedLoginAttempts int         `json:"-"`
+	LockedUntil         *time.Time  `json:"-"`
+	LastFailedLogin     *time.Time  `json:"-"`
 }
 
 type UserProfile struct {
@@ -374,37 +417,43 @@ func (s *Service) GetCompleteProfileByUserID(ctx context.Context, userID uuid.UU
 // ============================================================================
 
 func (s *Service) getCompleteProfile(ctx context.Context, userID string) (*CompleteUserProfile, error) {
-	// Use read transaction for consistency when fetching multiple related records
 	var result *CompleteUserProfile
-	err := core.WithReadTransaction(ctx, s.coreSvc.DB(), func(db *gorm.DB) UserRepository {
-		return NewUserRepository(db)
-	}, func(userRepo UserRepository) error {
+
+	// Use a manual transaction because we need to coordinate multiple repositories.
+	// The WithReadTransaction helper is too simple for this use case.
+	err := s.coreSvc.DB().WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		// Instantiate all repositories with the transaction object `tx`.
+		userRepo := NewUserRepository(tx)
+		profileRepo := NewProfileRepository(tx)
+		settingsRepo := NewSettingsRepository(tx)
+
 		// Fetch user
 		user, err := userRepo.GetByID(ctx, userID)
 		if err != nil {
 			return err
 		}
 
-		// Fetch or create profile and settings using the transaction repos
-		profileRepo := NewProfileRepository(s.coreSvc.DB())
-		settingsRepo := NewSettingsRepository(s.coreSvc.DB())
-
 		// Fetch or create profile
 		profile, err := profileRepo.GetByUserID(ctx, userID)
-		if err != nil && errors.Is(err, ErrProfileNotFound) {
-			// Create default profile
+		if err != nil {
+			if !errors.Is(err, ErrProfileNotFound) {
+				return err // Return actual error if it's not 'Not Found'
+			}
+			// Create default profile if it doesn't exist
 			profile = &UserProfile{UserID: userID}
 			if err := profileRepo.Create(ctx, profile); err != nil {
-				return errs.B().Msg("failed to create profile").Err()
+				s.logger.LogError(ctx, "create_profile_in_get_complete", err)
+				return err
 			}
-		} else if err != nil {
-			return err
 		}
 
 		// Fetch or create settings
 		settings, err := settingsRepo.GetByUserID(ctx, userID)
-		if err != nil && errors.Is(err, ErrSettingsNotFound) {
-			// Create default settings
+		if err != nil {
+			if !errors.Is(err, ErrSettingsNotFound) {
+				return err // Return actual error if it's not 'Not Found'
+			}
+			// Create default settings if they don't exist
 			settings = &UserSettings{
 				UserID:             userID,
 				EmailNotifications: true,
@@ -414,10 +463,9 @@ func (s *Service) getCompleteProfile(ctx context.Context, userID string) (*Compl
 				Timezone:           "Africa/Lagos",
 			}
 			if err := settingsRepo.Create(ctx, settings); err != nil {
-				return errs.B().Msg("failed to create settings").Err()
+				s.logger.LogError(ctx, "create_settings_in_get_complete", err)
+				return err
 			}
-		} else if err != nil {
-			return err
 		}
 
 		result = &CompleteUserProfile{
@@ -425,7 +473,7 @@ func (s *Service) getCompleteProfile(ctx context.Context, userID string) (*Compl
 			Profile:  *profile,
 			Settings: *settings,
 		}
-		return nil
+		return nil // Commit the transaction
 	})
 
 	if err != nil {
