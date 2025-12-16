@@ -47,3 +47,11 @@ func GenerateRandomID() string {
 func GenerateEventID() string {
 	return GenerateRandomID()
 }
+
+// GetActiveRole safely dereferences ActiveRole pointer
+func GetActiveRole(activeRole *string) string {
+	if activeRole != nil {
+		return *activeRole
+	}
+	return ""
+}

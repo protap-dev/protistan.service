@@ -122,7 +122,7 @@ func (h *SearchHandler) convertSearchResults(results []domain.SearchResult) []Ar
 				ID:         result.User.ID,
 				Email:      result.User.Email,
 				Roles:      result.User.Roles,
-				ActiveRole: result.User.ActiveRole,
+				ActiveRole: internal.GetActiveRole(result.User.ActiveRole),
 			},
 			Profile: domain.ProfileData{
 				FirstName: result.Profile.FirstName,

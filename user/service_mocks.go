@@ -242,12 +242,13 @@ func createTestService() (*Service, *mockUserRepository, *mockProfileRepository,
 
 // Helper function to create test data
 func createTestUser(userID string) *User {
+	activeRole := "customer"
 	return &User{
 		ID:              userID,
 		Email:           "test@example.com",
 		PasswordHash:    "hashed_password",
 		EmailVerified:   true,
-		ActiveRole:      "customer",
+		ActiveRole:      &activeRole,
 		ProfileComplete: false,
 		CreatedAt:       time.Now(),
 		UpdatedAt:       time.Now(),

@@ -5,6 +5,7 @@ import (
 	"database/sql/driver"
 	"errors"
 	"fmt"
+	"slices"
 	"strings"
 	"time"
 
@@ -107,7 +108,7 @@ type User struct {
 	PasswordHash        string      `json:"-" gorm:"column:password_hash"`
 	EmailVerified       bool        `json:"email_verified"`
 	Roles               StringArray `json:"roles" gorm:"type:text[];default:'{}'"`
-	ActiveRole          string      `json:"active_role"`
+	ActiveRole          *string     `json:"-" gorm:"column:active_role"`
 	ProfileComplete     bool        `json:"profile_complete"`
 	CreatedAt           time.Time   `json:"created_at"`
 	UpdatedAt           time.Time   `json:"updated_at"`
@@ -140,9 +141,11 @@ type UserSettings struct {
 }
 
 type CompleteUserProfile struct {
-	User     User         `json:"user"`
-	Profile  UserProfile  `json:"profile"`
-	Settings UserSettings `json:"settings"`
+	User            User         `json:"user"`
+	Profile         UserProfile  `json:"profile"`
+	Settings        UserSettings `json:"settings"`
+	OnboardingState string       `json:"onboarding_state"`
+	MissingFields   []string     `json:"missing_fields"`
 }
 
 // PublicUserProfile represents only publicly viewable user information
@@ -171,6 +174,100 @@ type UpdateSettingsRequest struct {
 	Timezone           *string `json:"timezone,omitempty"`
 }
 
+type UserProfileResponse struct {
+	User struct {
+		ID              string    `json:"id"`
+		Email           string    `json:"email"`
+		EmailVerified   bool      `json:"email_verified"`
+		RolesEnabled    []string  `json:"roles_enabled"`
+		ActiveRole      *string   `json:"active_role"`
+		ProfileComplete bool      `json:"profile_complete"`
+		CreatedAt       time.Time `json:"created_at"`
+		UpdatedAt       time.Time `json:"updated_at"`
+	} `json:"user"`
+
+	Profile  UserProfile  `json:"profile"`
+	Settings UserSettings `json:"settings"`
+
+	OnboardingState string   `json:"onboarding_state"`
+	MissingFields   []string `json:"missing_fields"`
+}
+
+func (s *Service) getProfileResponse(ctx context.Context, userID string) (*UserProfileResponse, error) {
+	var out *UserProfileResponse
+
+	err := s.coreSvc.DB().WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		userRepo := NewUserRepository(tx)
+		profileRepo := NewProfileRepository(tx)
+		settingsRepo := NewSettingsRepository(tx)
+
+		user, err := userRepo.GetByID(ctx, userID)
+		if err != nil {
+			return err
+		}
+
+		profile, err := profileRepo.GetByUserID(ctx, userID)
+		if err != nil {
+			if !errors.Is(err, ErrProfileNotFound) {
+				return err
+			}
+			profile = &UserProfile{UserID: userID}
+			if err := profileRepo.Create(ctx, profile); err != nil {
+				s.logger.LogError(ctx, "create_profile_in_get_profile_response", err)
+				return err
+			}
+		}
+
+		settings, err := settingsRepo.GetByUserID(ctx, userID)
+		if err != nil {
+			if !errors.Is(err, ErrSettingsNotFound) {
+				return err
+			}
+			settings = &UserSettings{
+				UserID:             userID,
+				EmailNotifications: true,
+				SMSNotifications:   false,
+				PushNotifications:  true,
+				Language:           "en",
+				Timezone:           "Africa/Lagos",
+			}
+			if err := settingsRepo.Create(ctx, settings); err != nil {
+				s.logger.LogError(ctx, "create_settings_in_get_profile_response", err)
+				return err
+			}
+		}
+
+		onboardingState, missing := s.computeOnboardingState(ctx, user, profile)
+
+		// Convert roles (StringArray) to []string for roles_enabled
+		rolesEnabled := []string(user.Roles)
+
+		// ActiveRole is already a *string on the model; just pass it through
+		resp := &UserProfileResponse{
+			Profile:         *profile,
+			Settings:        *settings,
+			OnboardingState: onboardingState,
+			MissingFields:   missing,
+		}
+
+		resp.User.ID = user.ID
+		resp.User.Email = user.Email
+		resp.User.EmailVerified = user.EmailVerified
+		resp.User.RolesEnabled = rolesEnabled
+		resp.User.ActiveRole = user.ActiveRole
+		resp.User.ProfileComplete = user.ProfileComplete
+		resp.User.CreatedAt = user.CreatedAt
+		resp.User.UpdatedAt = user.UpdatedAt
+
+		out = resp
+		return nil
+	})
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 // ============================================================================
 // PUBLIC API ENDPOINTS
 // ============================================================================
@@ -178,16 +275,15 @@ type UpdateSettingsRequest struct {
 // Get complete user profile
 //
 //encore:api auth method=GET path=/v0/user/profile
-func (s *Service) GetProfile(ctx context.Context) (*CompleteUserProfile, error) {
+func (s *Service) GetProfile(ctx context.Context) (*UserProfileResponse, error) {
 	userID, ok := authUserID()
 	if !ok {
 		return nil, ErrUnauthenticated
 	}
-
 	userIDStr := string(userID)
 	s.logger.LogUserAction(ctx, "get_profile", userIDStr)
 
-	return s.getCompleteProfile(ctx, userIDStr)
+	return s.getProfileResponse(ctx, userIDStr)
 }
 
 // Update user profile
@@ -417,6 +513,122 @@ func (s *Service) GetCompleteProfileByUserID(ctx context.Context, userID uuid.UU
 // PRIVATE HELPER METHODS
 // ============================================================================
 
+// computeOnboardingState determines the user's onboarding state and missing fields
+func (s *Service) computeOnboardingState(ctx context.Context, user *User, profile *UserProfile) (string, []string) {
+	var missing []string
+
+	// -------------------------
+	// 1) Basic profile checklist
+	// -------------------------
+	if strings.TrimSpace(profile.FirstName) == "" {
+		missing = append(missing, "first_name")
+	}
+	if strings.TrimSpace(profile.LastName) == "" {
+		missing = append(missing, "last_name")
+	}
+	if strings.TrimSpace(profile.Phone) == "" {
+		missing = append(missing, "phone")
+	}
+	if strings.TrimSpace(profile.AvatarURL) == "" {
+		missing = append(missing, "avatar_url")
+	}
+	if len(missing) > 0 {
+		return "needs_basic_profile", missing
+	}
+
+	// --------------------------------
+	// 2) Role selection
+	// --------------------------------
+	// New users can have no role yet.
+	if len(user.Roles) == 0 {
+		return "choose_role", []string{"role"}
+	}
+
+	// Resolve active role string safely (pointer may be nil)
+	var activeRole string
+	if user.ActiveRole != nil {
+		activeRole = strings.TrimSpace(*user.ActiveRole)
+	}
+
+	if activeRole == "" {
+		return "choose_active_role", []string{"active_role"}
+	}
+
+	// Ensure active_role is one of roles_enabled (defensive check).
+	if !contains([]string(user.Roles), activeRole) {
+		return "choose_active_role", []string{"active_role"}
+	}
+
+	// -------------------------
+	// 3) Role-specific gating
+	// -------------------------
+	switch activeRole {
+	case "customer":
+		var addressCount int64
+		if err := s.coreSvc.DB().WithContext(ctx).
+			Table("customer_addresses").
+			Where("user_id = ?", user.ID).
+			Count(&addressCount).Error; err != nil {
+			// If DB check fails, keep UX safe: require address.
+			return "needs_address", []string{"address"}
+		}
+		if addressCount == 0 {
+			return "needs_address", []string{"address"}
+		}
+		return "ready_customer", []string{}
+
+	case "artisan":
+		// Query artisan record once and reuse the fields.
+		type artisanRow struct {
+			ID                 string
+			RatesCount         int
+			AvailabilityStatus string
+		}
+		var a artisanRow
+		if err := s.coreSvc.DB().WithContext(ctx).
+			Table("artisans").
+			Select("id, rates_count, availability_status").
+			Where("user_id = ?", user.ID).
+			Take(&a).Error; err != nil {
+			// Not found or DB error -> treat as missing profile
+			return "needs_artisan_profile", []string{"artisan_profile"}
+		}
+
+		if a.RatesCount < 1 {
+			return "needs_rates", []string{"rates"}
+		}
+
+		// Verification gating (use artisan_verifications table) – flag off for now.
+		verificationRequired := false // TODO: wire from config when you want to enforce it
+		if verificationRequired {
+			var status string
+			err := s.coreSvc.DB().WithContext(ctx).
+				Table("artisan_verifications").
+				Select("verification_status").
+				Where("artisan_id = ?", a.ID).
+				Scan(&status).Error
+
+			// If there is no row yet or error, treat as unverified.
+			if err != nil || strings.TrimSpace(status) == "" || status != "verified" {
+				return "needs_verification", []string{"verification"}
+			}
+		}
+
+		if a.AvailabilityStatus != "available" {
+			return "needs_availability_on", []string{"availability"}
+		}
+
+		return "ready_artisan", []string{}
+
+	default:
+		// Unknown active_role: force user to pick a valid one.
+		return "choose_active_role", []string{"active_role"}
+	}
+}
+func contains(list []string, v string) bool {
+	return slices.Contains(list, v)
+}
+
 func (s *Service) getCompleteProfile(ctx context.Context, userID string) (*CompleteUserProfile, error) {
 	var result *CompleteUserProfile
 
@@ -469,10 +681,15 @@ func (s *Service) getCompleteProfile(ctx context.Context, userID string) (*Compl
 			}
 		}
 
+		// Compute onboarding state and missing fields
+		onboardingState, missingFields := s.computeOnboardingState(ctx, user, profile)
+
 		result = &CompleteUserProfile{
-			User:     *user,
-			Profile:  *profile,
-			Settings: *settings,
+			User:            *user,
+			Profile:         *profile,
+			Settings:        *settings,
+			OnboardingState: onboardingState,
+			MissingFields:   missingFields,
 		}
 		return nil // Commit the transaction
 	})

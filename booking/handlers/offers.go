@@ -137,7 +137,7 @@ func (h *BookingsHandler) OfferBooking(ctx context.Context, bookingID string, re
 	}
 
 	// Authorization: Only customer who owns the booking or admin can offer it
-	userRole, err := h.getUserRole(ctx, userCtx.ID)
+	userRole, err := h.getActiveRole(ctx, userCtx.ID)
 	if err != nil {
 		return nil, err
 	}
@@ -180,7 +180,7 @@ func (h *BookingsHandler) AcceptOffer(ctx context.Context, offerID string, req *
 	// Authorization: Get artisan profile for current user
 	// The offer.ArtisanID is the artisan PROFILE ID, not the user ID
 	// We need to check if this user owns that artisan profile
-	userRole, err := h.getUserRole(ctx, userCtx.ID)
+	userRole, err := h.getActiveRole(ctx, userCtx.ID)
 	if err != nil {
 		return nil, err
 	}
@@ -396,7 +396,7 @@ func (h *BookingsHandler) ListBookingOffers(ctx context.Context, bookingID strin
 	}
 
 	// Authorization: Only customer who owns booking, assigned artisan, or admin can view offers
-	userRole, err := h.getUserRole(ctx, userCtx.ID)
+	userRole, err := h.getActiveRole(ctx, userCtx.ID)
 	if err != nil {
 		return nil, err
 	}
@@ -437,12 +437,12 @@ func (h *BookingsHandler) ListArtisanOffers(ctx context.Context, params *ListOff
 		return nil, err
 	}
 
-	// Authorization: Only artisans can view their offers
-	userRole, err := h.getUserRole(ctx, userCtx.ID)
+	// Authorization: must currently be in artisan mode (active_role == "artisan")
+	activeRole, err := h.getActiveRole(ctx, userCtx.ID)
 	if err != nil {
 		return nil, err
 	}
-	if userRole != "artisan" {
+	if activeRole != "artisan" {
 		return nil, binternal.ErrPermissionDenied
 	}
 
@@ -454,13 +454,11 @@ func (h *BookingsHandler) ListArtisanOffers(ctx context.Context, params *ListOff
 
 	// Parse ExpiresAfter parameter
 	if params.ExpiresAfter != "" {
-		// Try parsing as a duration (e.g., "5h", "24h")
 		duration, err := time.ParseDuration(params.ExpiresAfter)
 		if err == nil {
 			expiresAfterTime := time.Now().Add(-duration)
 			filter.ExpiresAfter = &expiresAfterTime
 		} else {
-			// Try parsing as a timestamp (RFC3339)
 			expiresAfterTime, err := time.Parse(time.RFC3339, params.ExpiresAfter)
 			if err != nil {
 				return nil, fmt.Errorf("invalid expires_after format: must be a duration string or RFC3339 timestamp")
@@ -469,7 +467,6 @@ func (h *BookingsHandler) ListArtisanOffers(ctx context.Context, params *ListOff
 		}
 	}
 
-	// Get offers with details
 	offerDetails, err := h.repo.GetArtisanOffersWithDetails(ctx, userCtx.ID, filter)
 	if err != nil {
 		h.logger.Error(ctx, "failed to list artisan offers", err, map[string]any{
@@ -479,7 +476,6 @@ func (h *BookingsHandler) ListArtisanOffers(ctx context.Context, params *ListOff
 		return nil, fmt.Errorf("failed to list offers: %w", err)
 	}
 
-	// Convert to response DTOs
 	offerResponses := make([]*ArtisanOfferResponse, len(offerDetails))
 	for i, detail := range offerDetails {
 		offerResponses[i] = &ArtisanOfferResponse{
@@ -493,7 +489,7 @@ func (h *BookingsHandler) ListArtisanOffers(ctx context.Context, params *ListOff
 				LocationArea:      fmt.Sprintf("%s, %s", detail.CustomerCity, detail.CustomerState),
 				Description:       detail.Booking.Description,
 				Photos:            detail.Booking.MediaURLs,
-				Distance:          0, // Placeholder as we don't calculate distance yet
+				Distance:          0,
 				ScheduledAt:       detail.Booking.ScheduledAt,
 				IsFlexible:        detail.Booking.IsFlexible,
 			},

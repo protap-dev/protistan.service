@@ -30,27 +30,24 @@ func ValidateBookingReferences(ctx context.Context, req *domain.CreateBookingReq
 
 // ValidateCustomerRole ensures the user is a customer with complete profile
 func ValidateCustomerRole(ctx context.Context, userID string, logger ServiceLogger) error {
-	userUUID, err := uuid.FromString(userID)
+	// Use user service API to get profile (same as booking handlers)
+	profileResp, err := user.GetProfile(ctx)
 	if err != nil {
-		return fmt.Errorf("invalid user_id format: %w", err)
-	}
-	u, err := user.GetUserByID(ctx, userUUID)
-	if err != nil {
-		logger.Error(ctx, "failed to get user for role validation", err, map[string]any{
+		logger.Error(ctx, "failed to get user profile for role validation", err, map[string]any{
 			"user_id": userID,
 		})
 		return fmt.Errorf("failed to validate user: %w", err)
 	}
-	if u.ActiveRole != "customer" {
+	if GetActiveRole(profileResp.User.ActiveRole) != "customer" {
 		return errors.New("only customers can create bookings")
 	}
-	if !u.ProfileComplete {
+	if !profileResp.User.ProfileComplete {
 		return errors.New("customer profile must be complete to create bookings")
 	}
 	logger.Info(ctx, "customer role validation successful", map[string]any{
 		"user_id":          userID,
-		"user_role":        u.ActiveRole,
-		"profile_complete": u.ProfileComplete,
+		"user_role":        GetActiveRole(profileResp.User.ActiveRole),
+		"profile_complete": profileResp.User.ProfileComplete,
 	})
 	return nil
 }
