@@ -5,6 +5,7 @@ import (
 	"encoding/hex"
 	"fmt"
 
+	"encore.dev/beta/auth"
 	"github.com/google/uuid"
 )
 
@@ -54,4 +55,12 @@ func GetActiveRole(activeRole *string) string {
 		return *activeRole
 	}
 	return ""
+}
+
+// ExtractUserIDFromContext extracts the authenticated user ID from context for logging purposes
+func ExtractUserIDFromContext() string {
+	if userID, ok := auth.UserID(); ok {
+		return string(userID)
+	}
+	return "unknown"
 }

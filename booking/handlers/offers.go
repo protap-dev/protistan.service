@@ -137,7 +137,7 @@ func (h *BookingsHandler) OfferBooking(ctx context.Context, bookingID string, re
 	}
 
 	// Authorization: Only customer who owns the booking or admin can offer it
-	userRole, err := h.getActiveRole(ctx, userCtx.ID)
+	userRole, err := h.getActiveRole(ctx)
 	if err != nil {
 		return nil, err
 	}
@@ -180,7 +180,7 @@ func (h *BookingsHandler) AcceptOffer(ctx context.Context, offerID string, req *
 	// Authorization: Get artisan profile for current user
 	// The offer.ArtisanID is the artisan PROFILE ID, not the user ID
 	// We need to check if this user owns that artisan profile
-	userRole, err := h.getActiveRole(ctx, userCtx.ID)
+	userRole, err := h.getActiveRole(ctx)
 	if err != nil {
 		return nil, err
 	}
@@ -396,7 +396,7 @@ func (h *BookingsHandler) ListBookingOffers(ctx context.Context, bookingID strin
 	}
 
 	// Authorization: Only customer who owns booking, assigned artisan, or admin can view offers
-	userRole, err := h.getActiveRole(ctx, userCtx.ID)
+	userRole, err := h.getActiveRole(ctx)
 	if err != nil {
 		return nil, err
 	}
@@ -438,7 +438,7 @@ func (h *BookingsHandler) ListArtisanOffers(ctx context.Context, params *ListOff
 	}
 
 	// Authorization: must currently be in artisan mode (active_role == "artisan")
-	activeRole, err := h.getActiveRole(ctx, userCtx.ID)
+	activeRole, err := h.getActiveRole(ctx)
 	if err != nil {
 		return nil, err
 	}
