@@ -239,6 +239,7 @@ type ArtisanDBModel struct {
 	Languages          StringArray `gorm:"type:text[];column:languages"`
 	Rating             float64     `gorm:"column:rating"`
 	ReviewsCount       int         `gorm:"column:reviews_count"`
+	RatesCount         int         `gorm:"column:rates_count"`
 	AvailabilityStatus string      `gorm:"column:availability_status"`
 	//	Verified               bool        `gorm:"column:verified"`
 	AcceptsGenericRequests bool      `gorm:"column:accepts_generic_requests"`
@@ -273,6 +274,7 @@ func toDomainModel(db *ArtisanDBModel) *domain.ArtisanProfile {
 		Languages:          domain.StringArray(db.Languages),
 		Rating:             db.Rating,
 		ReviewsCount:       db.ReviewsCount,
+		RatesCount:         db.RatesCount,
 		AvailabilityStatus: db.AvailabilityStatus,
 		//		Verified:               db.Verified,
 		AcceptsGenericRequests: db.AcceptsGenericRequests,
@@ -303,6 +305,7 @@ func toDBModel(d *domain.ArtisanProfile) *ArtisanDBModel {
 		Languages:          StringArray(d.Languages),
 		Rating:             d.Rating,
 		ReviewsCount:       d.ReviewsCount,
+		RatesCount:         d.RatesCount,
 		AvailabilityStatus: d.AvailabilityStatus,
 		//	Verified:               d.Verified,
 		AcceptsGenericRequests: d.AcceptsGenericRequests,

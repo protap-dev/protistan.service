@@ -33,4 +33,3 @@ COMMENT ON COLUMN artisan_verifications.verification_status IS 'Current verifica
 COMMENT ON COLUMN artisan_verifications.verification_method IS 'How verification was completed: email, phone, document, manual';
 COMMENT ON COLUMN artisan_verifications.verified_by IS 'Admin who verified this artisan';
 COMMENT ON COLUMN artisan_verifications.verification_notes IS 'Notes about verification process';
-COMMENT ON COLUMN artisans.availability_status IS 'Current availability: available, busy, on_leave, unavailable, suspended';

@@ -49,6 +49,7 @@ CREATE TABLE artisans (
     availability_status VARCHAR(20) NOT NULL DEFAULT 'unavailable',
     max_travel_distance_km DECIMAL(10,2) DEFAULT 50 CHECK (max_travel_distance_km >= 0 AND max_travel_distance_km <= 500),
     avatar_url TEXT,
+    rates_count INT NOT NULL DEFAULT 0,
     
     -- Location for customer matching (coordinates as POINT: longitude latitude)
     coordinates POINT,
@@ -282,6 +283,7 @@ COMMENT ON TABLE artisan_portfolio IS 'Portfolio items showcasing artisan work';
 COMMENT ON TABLE artisan_rates IS 'Service-specific rates set by artisans';
 COMMENT ON TABLE service_categories IS 'Artisan service categories';
 COMMENT ON TABLE services IS 'Individual services within categories';
+COMMENT ON COLUMN artisans.availability_status IS 'Current availability: available, unavailable';
 COMMENT ON COLUMN artisans.search_vector IS 'Full-text search vector for bio, languages, and location';
 COMMENT ON COLUMN artisans.category_ids IS 'Array of service category IDs the artisan provides';
 COMMENT ON COLUMN artisans.coordinates IS 'Base location (POINT: longitude latitude) for proximity matching';
