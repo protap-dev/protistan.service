@@ -66,6 +66,7 @@ type ArtisanProfile struct {
 	Languages              StringArray `gorm:"type:text[]"`
 	Rating                 float64
 	ReviewsCount           int
+	AvailabilityStatus     string
 	Verified               bool
 	AcceptsGenericRequests bool
 	MaxTravelDistanceKm    float64

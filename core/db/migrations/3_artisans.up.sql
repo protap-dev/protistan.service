@@ -46,6 +46,7 @@ CREATE TABLE artisans (
     reviews_count INTEGER DEFAULT 0 CHECK (reviews_count >= 0),
     verified BOOLEAN DEFAULT FALSE,
     accepts_generic_requests BOOLEAN DEFAULT FALSE,
+    availability_status VARCHAR(20) NOT NULL DEFAULT 'unavailable',
     max_travel_distance_km DECIMAL(10,2) DEFAULT 50 CHECK (max_travel_distance_km >= 0 AND max_travel_distance_km <= 500),
     avatar_url TEXT,
     
@@ -63,6 +64,7 @@ CREATE TABLE artisans (
     created_at TIMESTAMPTZ DEFAULT NOW(),
     updated_at TIMESTAMPTZ DEFAULT NOW(),
     
+    CONSTRAINT chk_availability_status CHECK (availability_status IN ('available', 'unavailable')),
     UNIQUE(user_id) -- One artisan profile per user
 );
 
@@ -116,6 +118,7 @@ CREATE INDEX idx_artisans_rating ON artisans(rating DESC) WHERE rating > 0;
 CREATE INDEX idx_artisans_verified ON artisans(verified) WHERE verified = true;
 CREATE INDEX idx_artisans_experience ON artisans(years_experience DESC);
 CREATE INDEX idx_artisans_reviews_count ON artisans(reviews_count DESC);
+CREATE INDEX idx_artisans_availability_status ON artisans(availability_status);
 
 -- Location indexes for matching
 CREATE INDEX idx_artisans_coordinates ON artisans USING GIST(coordinates);

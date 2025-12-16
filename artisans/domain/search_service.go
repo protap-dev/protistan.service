@@ -155,7 +155,8 @@ func (s *SearchService) executeSearchQuery(ctx context.Context, input *SearchInp
 	selectFields := `
 		a.*,
 		u.email, u.roles, u.active_role, u.email_verified, u.profile_complete, u.created_at as user_created_at, u.updated_at as user_updated_at,
-		up.first_name, up.last_name, up.phone, up.avatar_url as user_avatar_url
+		up.first_name, up.last_name, up.phone, up.avatar_url as user_avatar_url,
+		COALESCE(av.verification_status, 'unverified') as verification_status
 	`
 
 	// Apply full-text search if query provided
@@ -169,7 +170,8 @@ func (s *SearchService) executeSearchQuery(ctx context.Context, input *SearchInp
 	}
 
 	query = query.Joins("JOIN users u ON a.user_id = u.id").
-		Joins("LEFT JOIN user_profiles up ON u.id = up.user_id")
+		Joins("LEFT JOIN user_profiles up ON u.id = up.user_id").
+		Joins("LEFT JOIN artisan_verifications av ON a.id = av.artisan_id")
 
 	// Apply category filter
 	if input.CategoryIDs != nil && len(*input.CategoryIDs) > 0 {
@@ -240,6 +242,7 @@ func (s *SearchService) executeSearchQuery(ctx context.Context, input *SearchInp
 		UserLastName        string      `gorm:"column:last_name"`
 		UserPhone           string      `gorm:"column:phone"`
 		UserAvatarURL       string      `gorm:"column:user_avatar_url"`
+		VerificationStatus  string      `gorm:"column:verification_status"`
 		Rank                float64     `gorm:"column:rank"`
 	}
 
@@ -250,8 +253,12 @@ func (s *SearchService) executeSearchQuery(ctx context.Context, input *SearchInp
 	// Convert to response format
 	searchResults := make([]SearchResult, len(results))
 	for i, result := range results {
+		// Set Verified field based on verification_status
+		artisan := result.ArtisanProfile
+		artisan.Verified = result.VerificationStatus == "verified"
+
 		searchResults[i] = SearchResult{
-			Artisan: result.ArtisanProfile,
+			Artisan: artisan,
 			User: user.User{
 				ID:              result.UserID,
 				Email:           result.UserEmail,

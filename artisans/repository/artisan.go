@@ -88,6 +88,19 @@ func (r *artisanRepository) Create(ctx context.Context, artisan *domain.ArtisanP
 		return err
 	}
 
+	// Create corresponding verification record
+	verification := &ArtisanVerificationDBModel{
+		ArtisanID:             dbModel.ID,
+		VerificationStatus:    "unverified",
+		VerificationUpdatedAt: time.Now(),
+		CreatedAt:             time.Now(),
+		UpdatedAt:             time.Now(),
+	}
+
+	if err := r.db.WithContext(ctx).Create(&verification).Error; err != nil {
+		return err
+	}
+
 	artisan.ID = dbModel.ID
 	artisan.CreatedAt = dbModel.CreatedAt
 	artisan.UpdatedAt = dbModel.UpdatedAt
@@ -106,7 +119,21 @@ func (r *artisanRepository) GetByID(ctx context.Context, id string) (*domain.Art
 		return nil, err
 	}
 
-	return toDomainModel(&dbModel), nil
+	// Fetch verification status
+	var verification ArtisanVerificationDBModel
+	if err := r.db.WithContext(ctx).Where("artisan_id = ?", dbModel.ID).First(&verification).Error; err != nil {
+		if !errors.Is(err, gorm.ErrRecordNotFound) {
+			return nil, err
+		}
+		// If no verification record exists, default to unverified
+		verification.VerificationStatus = "unverified"
+	}
+
+	// Convert to domain model and set verified status based on verification table
+	domainModel := toDomainModel(&dbModel)
+	domainModel.Verified = verification.VerificationStatus == "verified"
+
+	return domainModel, nil
 }
 
 // GetByArtisanID retrieves an artisan by artisan ID
@@ -120,7 +147,21 @@ func (r *artisanRepository) GetByArtisanID(ctx context.Context, artisanID string
 		return nil, err
 	}
 
-	return toDomainModel(&dbModel), nil
+	// Fetch verification status
+	var verification ArtisanVerificationDBModel
+	if err := r.db.WithContext(ctx).Where("artisan_id = ?", dbModel.ID).First(&verification).Error; err != nil {
+		if !errors.Is(err, gorm.ErrRecordNotFound) {
+			return nil, err
+		}
+		// If no verification record exists, default to unverified
+		verification.VerificationStatus = "unverified"
+	}
+
+	// Convert to domain model and set verified status based on verification table
+	domainModel := toDomainModel(&dbModel)
+	domainModel.Verified = verification.VerificationStatus == "verified"
+
+	return domainModel, nil
 }
 
 // Update modifies an existing artisan profile
@@ -175,27 +216,41 @@ func (r *artisanRepository) GetDB() *gorm.DB {
 	return r.db
 }
 
+// ArtisanVerificationDBModel represents the artisan_verifications table
+type ArtisanVerificationDBModel struct {
+	ID                    string    `gorm:"primarykey;type:uuid;default:generate_uuid()"`
+	ArtisanID             string    `gorm:"column:artisan_id"`
+	VerificationStatus    string    `gorm:"column:verification_status"`
+	VerificationMethod    string    `gorm:"column:verification_method"`
+	VerifiedBy            string    `gorm:"column:verified_by"`
+	VerificationNotes     string    `gorm:"column:verification_notes"`
+	VerificationUpdatedAt time.Time `gorm:"column:verification_updated_at"`
+	CreatedAt             time.Time `gorm:"column:created_at"`
+	UpdatedAt             time.Time `gorm:"column:updated_at"`
+}
+
 // DB model (maps to database table)
 type ArtisanDBModel struct {
-	ID                     string      `gorm:"primarykey;type:uuid;default:generate_uuid()"`
-	UserID                 string      `gorm:"column:user_id"`
-	CategoryIDs            StringArray `gorm:"type:uuid[];column:category_ids"`
-	Bio                    string      `gorm:"column:bio"`
-	YearsExperience        int         `gorm:"column:years_experience"`
-	Languages              StringArray `gorm:"type:text[];column:languages"`
-	Rating                 float64     `gorm:"column:rating"`
-	ReviewsCount           int         `gorm:"column:reviews_count"`
-	Verified               bool        `gorm:"column:verified"`
-	AcceptsGenericRequests bool        `gorm:"column:accepts_generic_requests"`
-	MaxTravelDistanceKm    float64     `gorm:"column:max_travel_distance_km"`
-	AvatarURL              string      `gorm:"column:avatar_url"`
-	Coordinates            *string     `gorm:"type:point;column:coordinates"`
-	PreferredCity          string      `gorm:"column:preferred_city"`
-	PreferredState         string      `gorm:"column:preferred_state"`
-	PreferredCountry       string      `gorm:"column:preferred_country"`
-	SearchVector           string      `gorm:"type:tsvector;column:search_vector"`
-	CreatedAt              time.Time   `gorm:"column:created_at"`
-	UpdatedAt              time.Time   `gorm:"column:updated_at"`
+	ID                 string      `gorm:"primarykey;type:uuid;default:generate_uuid()"`
+	UserID             string      `gorm:"column:user_id"`
+	CategoryIDs        StringArray `gorm:"type:uuid[];column:category_ids"`
+	Bio                string      `gorm:"column:bio"`
+	YearsExperience    int         `gorm:"column:years_experience"`
+	Languages          StringArray `gorm:"type:text[];column:languages"`
+	Rating             float64     `gorm:"column:rating"`
+	ReviewsCount       int         `gorm:"column:reviews_count"`
+	AvailabilityStatus string      `gorm:"column:availability_status"`
+	//	Verified               bool        `gorm:"column:verified"`
+	AcceptsGenericRequests bool      `gorm:"column:accepts_generic_requests"`
+	MaxTravelDistanceKm    float64   `gorm:"column:max_travel_distance_km"`
+	AvatarURL              string    `gorm:"column:avatar_url"`
+	Coordinates            *string   `gorm:"type:point;column:coordinates"`
+	PreferredCity          string    `gorm:"column:preferred_city"`
+	PreferredState         string    `gorm:"column:preferred_state"`
+	PreferredCountry       string    `gorm:"column:preferred_country"`
+	SearchVector           string    `gorm:"type:tsvector;column:search_vector"`
+	CreatedAt              time.Time `gorm:"column:created_at"`
+	UpdatedAt              time.Time `gorm:"column:updated_at"`
 }
 
 func (ArtisanDBModel) TableName() string {
@@ -210,15 +265,16 @@ func toDomainModel(db *ArtisanDBModel) *domain.ArtisanProfile {
 	}
 
 	return &domain.ArtisanProfile{
-		ID:                     db.ID,
-		UserID:                 db.UserID,
-		CategoryIDs:            []string(db.CategoryIDs),
-		Bio:                    db.Bio,
-		YearsExperience:        db.YearsExperience,
-		Languages:              []string(db.Languages),
-		Rating:                 db.Rating,
-		ReviewsCount:           db.ReviewsCount,
-		Verified:               db.Verified,
+		ID:                 db.ID,
+		UserID:             db.UserID,
+		CategoryIDs:        domain.StringArray(db.CategoryIDs),
+		Bio:                db.Bio,
+		YearsExperience:    db.YearsExperience,
+		Languages:          domain.StringArray(db.Languages),
+		Rating:             db.Rating,
+		ReviewsCount:       db.ReviewsCount,
+		AvailabilityStatus: db.AvailabilityStatus,
+		//		Verified:               db.Verified,
 		AcceptsGenericRequests: db.AcceptsGenericRequests,
 		MaxTravelDistanceKm:    db.MaxTravelDistanceKm,
 		AvatarURL:              db.AvatarURL,
@@ -239,15 +295,16 @@ func toDBModel(d *domain.ArtisanProfile) *ArtisanDBModel {
 	}
 
 	return &ArtisanDBModel{
-		ID:                     d.ID,
-		UserID:                 d.UserID,
-		CategoryIDs:            StringArray(d.CategoryIDs),
-		Bio:                    d.Bio,
-		YearsExperience:        d.YearsExperience,
-		Languages:              StringArray(d.Languages),
-		Rating:                 d.Rating,
-		ReviewsCount:           d.ReviewsCount,
-		Verified:               d.Verified,
+		ID:                 d.ID,
+		UserID:             d.UserID,
+		CategoryIDs:        StringArray(d.CategoryIDs),
+		Bio:                d.Bio,
+		YearsExperience:    d.YearsExperience,
+		Languages:          StringArray(d.Languages),
+		Rating:             d.Rating,
+		ReviewsCount:       d.ReviewsCount,
+		AvailabilityStatus: d.AvailabilityStatus,
+		//	Verified:               d.Verified,
 		AcceptsGenericRequests: d.AcceptsGenericRequests,
 		MaxTravelDistanceKm:    d.MaxTravelDistanceKm,
 		AvatarURL:              d.AvatarURL,
