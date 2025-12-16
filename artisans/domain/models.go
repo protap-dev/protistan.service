@@ -127,8 +127,9 @@ type PublicArtisanProfile struct {
 	PreferredCountry       string           `json:"preferred_country"`
 	Services               []ArtisanService `json:"services"`
 	// User info (public only)
-	UserFirstName string `json:"user_first_name"`
-	UserLastName  string `json:"user_last_name"`
+	UserFirstName      string `json:"user_first_name"`
+	UserLastName       string `json:"user_last_name"`
+	AvailabilityStatus string `json:"availability_status"`
 }
 
 // CompleteProfile aggregates user and artisan data

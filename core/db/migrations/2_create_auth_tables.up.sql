@@ -19,7 +19,6 @@ CREATE TABLE users (
     failed_login_attempts INTEGER DEFAULT 0,
     locked_until TIMESTAMP WITH TIME ZONE,
     last_failed_login TIMESTAMP WITH TIME ZONE,
-    CONSTRAINT check_user_type CHECK (user_type IN ('customer', 'artisan', 'admin')), -- deprecated
     CONSTRAINT check_roles_elements CHECK (roles <@ ARRAY['customer', 'artisan', 'admin']::text[]),
     CONSTRAINT check_active_role_valid CHECK (active_role IN ('customer', 'artisan', 'admin'))
 );

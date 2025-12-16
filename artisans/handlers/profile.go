@@ -34,6 +34,10 @@ type UpdateProfileRequest struct {
 	PreferredCountry    *string   `json:"preferred_country,omitempty"`
 }
 
+type UpdateAvailabilityRequest struct {
+	Status string `json:"status"` // 'available' or 'unavailable'
+}
+
 type SearchArtisansRequest struct {
 	Query         *string   `json:"query,omitempty"`           // Full-text search query
 	CategoryIDs   *[]string `json:"category_ids,omitempty"`    // Filter by service categories
@@ -87,6 +91,7 @@ type ProfileResponse struct {
 	PreferredCity       string   `json:"preferred_city"`
 	PreferredState      string   `json:"preferred_state"`
 	PreferredCountry    string   `json:"preferred_country"`
+	AvailabilityStatus  string   `json:"availability_status"`
 }
 
 // CompleteProfileResponse represents the complete profile response
@@ -199,6 +204,22 @@ func (h *ProfileHandler) Update(ctx context.Context, req *UpdateProfileRequest) 
 	return &response, nil
 }
 
+// UpdateAvailability handles availability status updates
+func (h *ProfileHandler) UpdateAvailability(ctx context.Context, req *UpdateAvailabilityRequest) (*ProfileResponse, error) {
+	userCtx, err := h.authHelper.ExtractUserContext(ctx, "update_artisan_availability")
+	if err != nil {
+		return nil, err
+	}
+
+	result, err := h.service.UpdateAvailability(ctx, userCtx, req.Status)
+	if err != nil {
+		return nil, err
+	}
+
+	response := toProfileResponse(result)
+	return &response, nil
+}
+
 // Get retrieves the authenticated user's profile
 func (h *ProfileHandler) Get(ctx context.Context) (*CompleteProfileResponse, error) {
 	userCtx, err := h.authHelper.ExtractUserContext(ctx, "get_artisan_profile")
@@ -246,5 +267,6 @@ func toProfileResponse(profile *domain.ArtisanProfile) ProfileResponse {
 		PreferredCity:       profile.PreferredCity,
 		PreferredState:      profile.PreferredState,
 		PreferredCountry:    profile.PreferredCountry,
+		AvailabilityStatus:  profile.AvailabilityStatus,
 	}
 }

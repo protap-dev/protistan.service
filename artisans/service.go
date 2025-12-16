@@ -72,6 +72,11 @@ func (s *Service) UpdateProfile(ctx context.Context, req *handlers.UpdateProfile
 	return s.profileHandler.Update(ctx, req)
 }
 
+//encore:api auth method=PUT path=/v0/artisans/availability
+func (s *Service) UpdateAvailability(ctx context.Context, req *handlers.UpdateAvailabilityRequest) (*handlers.ProfileResponse, error) {
+	return s.profileHandler.UpdateAvailability(ctx, req)
+}
+
 //encore:api auth method=GET path=/v0/artisans/profile
 func (s *Service) GetProfile(ctx context.Context) (*handlers.CompleteProfileResponse, error) {
 	return s.profileHandler.Get(ctx)

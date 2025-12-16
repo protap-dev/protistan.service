@@ -251,6 +251,25 @@ func (r *bookingRepository) GetArtisanOffersWithDetails(ctx context.Context, art
 	return result, nil
 }
 
+// GetArtisanAvailability retrieves the availability status of an artisan directly from the database
+func (r *bookingRepository) GetArtisanAvailability(ctx context.Context, artisanID string) (string, error) {
+	var status string
+	result := r.coreDB.WithContext(ctx).Table("artisans").
+		Select("availability_status").
+		Where("id = ?", artisanID).
+		Scan(&status)
+
+	if result.Error != nil {
+		return "", result.Error
+	}
+
+	if result.RowsAffected == 0 {
+		return "", errors.New("artisan not found")
+	}
+
+	return status, nil
+}
+
 // CreateOfferExpiredEventInOutbox writes offer expired event to outbox
 func (r *bookingRepository) CreateOfferExpiredEventInOutbox(ctx context.Context, event *domain.BookingEvent) error {
 	return insertEventInOutbox(r.coreDB, ctx, event, "booking.v1.offer.expired")

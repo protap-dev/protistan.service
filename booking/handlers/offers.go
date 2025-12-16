@@ -26,10 +26,24 @@ func (h *BookingsHandler) CreateOfferInternal(ctx context.Context, bookingID str
 		return nil, fmt.Errorf("expires_in cannot exceed 72 hours")
 	}
 
+	// Check artisan availability
+	availabilityStatus, err := h.repo.GetArtisanAvailability(ctx, artisanID)
+	if err != nil {
+		return nil, fmt.Errorf("failed to check artisan availability: %w", err)
+	}
+
+	if availabilityStatus == "unavailable" {
+		h.logger.Info(ctx, "cannot offer booking: artisan is unavailable", map[string]any{
+			"artisan_id": artisanID,
+			"booking_id": bookingID,
+		})
+		return nil, fmt.Errorf("artisan is currently unavailable")
+	}
+
 	// Create offer and update booking status in transaction
 	var offer *domain.BookingOffer
 
-	err := h.repo.WithTransaction(ctx, func(txRepo domain.BookingRepository) error {
+	err = h.repo.WithTransaction(ctx, func(txRepo domain.BookingRepository) error {
 		// Get fresh booking for status update and validation
 		currentBooking, err := txRepo.GetByID(ctx, bookingID)
 		if err != nil {

@@ -83,12 +83,6 @@ func (s *Service) Register(ctx context.Context, req *RegisterRequest) (*AuthResp
 		return nil, err
 	}
 
-	// Sanitize and validate user_type
-	// userType := strings.ToLower(strings.TrimSpace(req.UserType))
-	// if err := ValidateUserType(userType); err != nil {
-	// 	return nil, err
-	// }
-
 	// Check if user already exists
 	var existingUser User
 	if err := s.db.Where("email = ?", normalizedEmail).First(&existingUser).Error; err == nil {
