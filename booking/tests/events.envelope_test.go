@@ -10,13 +10,14 @@ import (
 	"encore.app/booking/domain"
 	"encore.app/booking/events"
 	"encore.app/booking/internal"
+	"encore.app/booking/repository"
 	eventscommon "encore.app/core/events"
 	"encore.dev/et"
-	"encore.dev/pubsub"
 	"github.com/google/uuid"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
-	"x.encore.dev/infra/pubsub/outbox"
+	"gorm.io/driver/postgres"
+	"gorm.io/gorm"
 )
 
 // TestEventEnvelopeCreation tests that event envelopes are created correctly with metadata
@@ -238,20 +239,42 @@ func TestEventEnvelopePublishingThroughOutbox(t *testing.T) {
 	testDB, err := et.NewTestDatabase(ctx, "booking")
 	require.NoError(t, err)
 
+	// initializes GORM connection
+	gormDB, err := gorm.Open(postgres.New(postgres.Config{
+		Conn: testDB.Stdlib(),
+	}), &gorm.Config{})
+	require.NoError(t, err)
+
+	// Create outbox table manually in test DB (mimicking core DB schema)
+	// We need this because the code writes to 'outbox' table which is expected to exist
+	tx := gormDB.Exec(`
+		CREATE TABLE IF NOT EXISTS outbox (
+			id UUID PRIMARY KEY DEFAULT generate_uuid(),
+			topic TEXT NOT NULL,
+			data JSONB NOT NULL,
+			inserted_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+			processed_at TIMESTAMPTZ,
+			retry_count INTEGER DEFAULT 0,
+			next_retry_at TIMESTAMPTZ,
+			last_error TEXT,
+			status TEXT DEFAULT 'pending'
+		);
+	`)
+	require.NoError(t, tx.Error)
+
+	// Initialize repository with the test DB acting as BOTH booking DB and core DB
+	repo := repository.NewBookingRepository(gormDB, gormDB)
+
 	// Create event with metadata
 	metadata := &internal.EventMetadata{
 		CorrelationID: "test-correlation-123",
-		CausationID:   "test-causation-456", // ADD CAUSATION so it appears in JSON
+		CausationID:   "test-causation-456",
 		UserID:        "user-456",
 		RequestID:     "req-789",
 	}
 	ctx = eventscommon.WithEventMetadata(ctx, metadata)
 
 	// Publish event through actual outbox
-	tx, err := testDB.Begin(ctx)
-	require.NoError(t, err)
-	defer tx.Rollback()
-
 	event := domain.BookingEvent{
 		BookingID: "booking-123",
 		Status:    domain.BookingRequested,
@@ -259,34 +282,27 @@ func TestEventEnvelopePublishingThroughOutbox(t *testing.T) {
 		UserID:    "user-456",
 	}
 
-	// Create envelope
-	envelope := events.CreateEventEnvelope(ctx, "booking.created", event)
-
-	// Publish through outbox (event wrapped in envelope)
-	topicRef := pubsub.TopicRef[pubsub.Publisher[*events.EventEnvelope[domain.BookingEvent]]](events.RematchTopic)
-	outboxRef := outbox.Bind(topicRef, outbox.TxPersister(tx))
-
-	msgID, err := outboxRef.Publish(ctx, envelope)
+	// Publish event using repository (which writes manually to outbox)
+	err = repo.CreateEventInOutbox(ctx, &event)
 	require.NoError(t, err)
-	require.NotEmpty(t, msgID)
 
-	require.NoError(t, tx.Commit())
-
-	t.Logf("✓ Published envelope to outbox: msgID=%s", msgID)
-
-	// Verify message in outbox contains envelope structure
+	// Verify message in outbox table
+	var count int64
 	var dataJSON string
-	err = testDB.QueryRow(ctx,
-		"SELECT data::text FROM outbox WHERE id = $1", msgID).Scan(&dataJSON)
+	row := gormDB.Raw("SELECT count(*), data::text FROM outbox WHERE topic = 'booking.created' GROUP BY data::text").Row()
+	err = row.Scan(&count, &dataJSON)
 	require.NoError(t, err)
-	require.NotEmpty(t, dataJSON)
+	assert.Equal(t, int64(1), count)
+
+	t.Logf("✓ Published envelope to outbox (manual insertion logic verified)")
 
 	// Verify JSON contains envelope fields
 	assert.Contains(t, dataJSON, "event_id", "should contain event_id field")
 	assert.Contains(t, dataJSON, "correlation_id", "should contain correlation_id field")
-	assert.Contains(t, dataJSON, "causation_id", "should contain causation_id field") // Now it will be there!
+	assert.Contains(t, dataJSON, "causation_id", "should contain causation_id field")
 	assert.Contains(t, dataJSON, "producer", "should contain producer field")
 	assert.Contains(t, dataJSON, "occurred_at", "should contain occurred_at field")
+	assert.Contains(t, dataJSON, "booking.created", "should contain event type")
 	assert.Contains(t, dataJSON, "booking-123", "should contain event data")
 
 	t.Logf("✓ Event published with complete envelope structure in outbox")

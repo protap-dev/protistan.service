@@ -225,7 +225,8 @@ func (s *Service) UpdateProfile(ctx context.Context, req *UpdateProfileRequest) 
 		}
 
 		// Get existing profile
-		profile, err := profileRepo.GetByUserID(ctx, userIDStr)
+		var err error
+		profile, err = profileRepo.GetByUserID(ctx, userIDStr)
 		if err != nil {
 			// If profile does not exist, create a new one
 			if errors.Is(err, ErrProfileNotFound) {

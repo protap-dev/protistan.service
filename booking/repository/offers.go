@@ -256,7 +256,7 @@ func (r *bookingRepository) GetArtisanAvailability(ctx context.Context, artisanI
 	var status string
 	result := r.coreDB.WithContext(ctx).Table("artisans").
 		Select("availability_status").
-		Where("id = ?", artisanID).
+		Where("user_id = ?", artisanID).
 		Scan(&status)
 
 	if result.Error != nil {
