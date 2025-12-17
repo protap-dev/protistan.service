@@ -76,35 +76,32 @@ func NewProfileService(repo ArtisanRepository, validator *Validator, logger inte
 func (s *ProfileService) CreateProfile(ctx context.Context, userCtx *internal.UserContext, input *CreateProfileInput) (*CompleteProfile, error) {
 	var result *CompleteProfile
 
-	// Execute entire operation within a transaction
 	err := s.repo.WithTransaction(ctx, func(txRepo ArtisanRepository) error {
 		// 1. Validate input first
 		if err := s.validator.ValidateCreateProfile(input); err != nil {
-			return err // Transaction will rollback
+			return err
 		}
 
 		// 2. Verify user is an artisan (external API call)
 		completeProfile, err := s.verifyArtisanUser(ctx, userCtx.UUID)
 		if err != nil {
-			return err // Transaction will rollback
+			return err
 		}
 
 		// 3. Check if basic user profile is complete (prerequisite for artisan profile)
-		if err := s.validateBasicProfileComplete(completeProfile); err != nil {
-			return err // Transaction will rollback
+		if err := s.validateBasicProfileComplete(&completeProfile.Profile); err != nil {
+			return err
 		}
 
 		// 4. Check if profile exists within transaction
 		existing, err := txRepo.GetByID(ctx, userCtx.ID)
 		if err != nil && !errors.Is(err, ErrNotFound) {
-			return err // Transaction will rollback
+			return err
 		}
 
 		var artisan *ArtisanProfile
 
-		// 3. Create or update artisan profile within transaction
 		if existing != nil {
-			// Update existing profile
 			updates := map[string]any{
 				"category_ids":           input.CategoryIDs,
 				"bio":                    input.Bio,
@@ -118,16 +115,14 @@ func (s *ProfileService) CreateProfile(ctx context.Context, userCtx *internal.Us
 			}
 
 			if err := txRepo.Update(ctx, existing.ID, updates); err != nil {
-				return err // Transaction will rollback
+				return err
 			}
 
-			// Reload updated profile within transaction
 			artisan, err = txRepo.GetByID(ctx, existing.ID)
 			if err != nil {
-				return err // Transaction will rollback
+				return err
 			}
 		} else {
-			// Create new profile
 			artisan = &ArtisanProfile{
 				UserID:              userCtx.ID,
 				CategoryIDs:         input.CategoryIDs,
@@ -146,11 +141,10 @@ func (s *ProfileService) CreateProfile(ctx context.Context, userCtx *internal.Us
 			}
 
 			if err := txRepo.Create(ctx, artisan); err != nil {
-				return err // Transaction will rollback
+				return err
 			}
 		}
 
-		// 4. Build complete response
 		result = &CompleteProfile{
 			User: UserData{
 				ID:         completeProfile.User.ID,
@@ -168,7 +162,7 @@ func (s *ProfileService) CreateProfile(ctx context.Context, userCtx *internal.Us
 			Artisan:  *artisan,
 		}
 
-		return nil // Transaction will commit
+		return nil
 	})
 
 	if err != nil {
@@ -186,29 +180,24 @@ func (s *ProfileService) CreateProfile(ctx context.Context, userCtx *internal.Us
 func (s *ProfileService) UpdateProfile(ctx context.Context, userCtx *internal.UserContext, input *UpdateProfileInput) (*ArtisanProfile, error) {
 	var result *ArtisanProfile
 
-	// Execute update operation within a transaction
 	err := s.repo.WithTransaction(ctx, func(txRepo ArtisanRepository) error {
-		// 1. Validate input first
+		// 1) Validate input first
 		if err := s.validator.ValidateUpdateProfile(input); err != nil {
-			return err // Transaction will rollback
+			return err
 		}
 
-		// 2. Verify user is an artisan (external API call)
-		_, err := s.verifyArtisanUser(ctx, userCtx.UUID)
+		// 2) Verify user is an artisan and get profile data in one call
+		completeProfile, err := s.verifyArtisanUser(ctx, userCtx.UUID)
 		if err != nil {
-			return err // Transaction will rollback
+			return err
 		}
 
-		// 3. Check if basic user profile is complete (prerequisite for artisan profile operations)
-		completeProfile, err := user.GetCompleteProfileByUserID(ctx, userCtx.UUID)
-		if err != nil {
-			return err // Transaction will rollback
-		}
-		if err := s.validateBasicProfileComplete(completeProfile); err != nil {
-			return err // Transaction will rollback
+		// 3) Check if basic user profile is complete
+		if err := s.validateBasicProfileComplete(&completeProfile.Profile); err != nil {
+			return err
 		}
 
-		// 4. Get existing profile within transaction
+		// 4) Get existing profile within transaction
 		existing, err := txRepo.GetByID(ctx, userCtx.ID)
 		if err != nil {
 			if errors.Is(err, ErrNotFound) {
@@ -217,26 +206,25 @@ func (s *ProfileService) UpdateProfile(ctx context.Context, userCtx *internal.Us
 			return internal.ErrDatabaseError
 		}
 
-		// 5. Build updates within transaction
+		// 5) Build updates within transaction
 		updates := s.buildUpdates(input)
 		if len(updates) == 0 {
-			// No updates needed, return existing profile
 			result = existing
 			return nil
 		}
 
-		// 6. Apply updates within transaction
+		// 6) Apply updates within transaction
 		if err := txRepo.Update(ctx, existing.ID, updates); err != nil {
 			return internal.ErrDatabaseError
 		}
 
-		// 7. Reload updated profile within transaction
+		// 7) Reload updated profile within transaction
 		result, err = txRepo.GetByArtisanID(ctx, existing.ID)
 		if err != nil {
 			return internal.ErrDatabaseError
 		}
 
-		return nil // Transaction will commit
+		return nil
 	})
 
 	if err != nil {
@@ -363,30 +351,35 @@ func (s *ProfileService) getPublicUserProfile(ctx context.Context, userID string
 		return cached, nil
 	}
 
-	// 2. Cache miss - fetch from user service using optimized public endpoint
+	// 2) Convert to UUID for user service request
 	userUUID, err := uuid.FromString(userID)
 	if err != nil {
 		return nil, err
 	}
 
-	// 3. Use the new efficient public profile endpoint (only fetches public data)
-	publicProfile, err := user.GetPublicProfileByUserID(ctx, userUUID)
+	// 3) Fetch via consolidated internal API (public-only)
+	resp, err := user.FetchInternal(ctx, &user.InternalUserFetchRequest{
+		UserID:               userUUID,
+		IncludePublicProfile: true,
+		EnsureProfile:        false,
+	})
 	if err != nil {
 		return nil, err
 	}
-
-	// 4. Convert to UserProfile format for compatibility
-	profile := &user.UserProfile{
-		FirstName: publicProfile.FirstName,
-		LastName:  publicProfile.LastName,
-		AvatarURL: publicProfile.AvatarURL,
-		// Note: Phone is not included in public profile for privacy
+	if resp.PublicProfile == nil {
+		return nil, user.ErrProfileNotFound
 	}
 
-	// 5. Cache the result for future requests (5 minute TTL)
+	// 4) Convert to UserProfile format for compatibility
+	profile := &user.UserProfile{
+		FirstName: resp.PublicProfile.FirstName,
+		LastName:  resp.PublicProfile.LastName,
+		AvatarURL: resp.PublicProfile.AvatarURL,
+	}
+
+	// 5) Cache and return
 	cache.Set(userID, profile, 5*time.Minute)
 	s.logger.LogUserAction(ctx, "public_profile_cached", userID)
-
 	return profile, nil
 }
 
@@ -394,15 +387,32 @@ func (s *ProfileService) getPublicUserProfile(ctx context.Context, userID string
 func (s *ProfileService) GetProfile(ctx context.Context, userCtx *internal.UserContext) (*CompleteProfile, error) {
 	var result *CompleteProfile
 
-	// Execute profile retrieval within a read-only transaction for consistency
 	err := s.repo.WithReadTransaction(ctx, func(txRepo ArtisanRepository) error {
-		// 1. Verify user is an artisan (external API call)
-		completeProfile, err := s.verifyArtisanUser(ctx, userCtx.UUID)
+		// 1) Fetch user + profile in one RPC (no writes)
+		resp, err := user.FetchInternal(ctx, &user.InternalUserFetchRequest{
+			UserID:         userCtx.UUID,
+			IncludeUser:    true,
+			IncludeProfile: true,
+
+			EnsureProfile:  false,
+			EnsureSettings: false,
+		})
 		if err != nil {
 			return err
 		}
+		if resp.User == nil {
+			return internal.ErrUnauthorizedAction
+		}
+		if resp.Profile == nil {
+			return user.ErrProfileNotFound
+		}
 
-		// 2. Get artisan profile within transaction for consistency
+		// Authorize by roles_enabled (not active_role)
+		if !slices.Contains([]string(resp.User.Roles), "artisan") {
+			return internal.ErrUnauthorizedAction
+		}
+
+		// 2) Get artisan profile within this service's read transaction
 		artisan, err := txRepo.GetByID(ctx, userCtx.ID)
 		if err != nil {
 			if errors.Is(err, ErrNotFound) {
@@ -411,76 +421,106 @@ func (s *ProfileService) GetProfile(ctx context.Context, userCtx *internal.UserC
 			return internal.ErrDatabaseError
 		}
 
-		// 3. Build complete response within transaction
+		// 3) Build response
 		result = &CompleteProfile{
 			User: UserData{
-				ID:         completeProfile.User.ID,
-				Email:      completeProfile.User.Email,
-				Roles:      completeProfile.User.Roles,
-				ActiveRole: internal.GetActiveRole(completeProfile.User.ActiveRole),
+				ID:         resp.User.ID,
+				Email:      resp.User.Email,
+				Roles:      resp.User.Roles,
+				ActiveRole: internal.GetActiveRole(resp.User.ActiveRole),
 			},
 			Profile: ProfileData{
-				FirstName: completeProfile.Profile.FirstName,
-				LastName:  completeProfile.Profile.LastName,
-				Phone:     completeProfile.Profile.Phone,
-				AvatarURL: completeProfile.Profile.AvatarURL,
+				FirstName: resp.Profile.FirstName,
+				LastName:  resp.Profile.LastName,
+				Phone:     resp.Profile.Phone,
+				AvatarURL: resp.Profile.AvatarURL,
 			},
 			Settings: SettingsData{},
 			Artisan:  *artisan,
 		}
 
-		return nil // Transaction will commit
+		return nil
 	})
 
 	if err != nil {
 		s.logger.LogError(ctx, "get_profile_transaction_failed", err)
 		return nil, err
 	}
-
 	return result, nil
 }
 
 // Private helpers
 func (s *ProfileService) verifyArtisanUser(ctx context.Context, userUUID uuid.UUID) (*user.CompleteUserProfile, error) {
-	completeProfile, err := user.GetCompleteProfileByUserID(ctx, userUUID)
+	resp, err := user.FetchInternal(ctx, &user.InternalUserFetchRequest{
+		UserID:         userUUID,
+		IncludeUser:    true,
+		IncludeProfile: true, // needed because callers use completeProfile.Profile
+
+		EnsureProfile:  false,
+		EnsureSettings: false,
+	})
 	if err != nil {
-		s.logger.LogError(ctx, "get_user_profile", err)
+		s.logger.LogError(ctx, "fetch_user_for_verify_artisan", err)
 		return nil, err
 	}
-	if completeProfile == nil {
+	if resp.User == nil {
 		return nil, internal.ErrUnauthorizedAction
 	}
 
 	// Authorize by roles_enabled (not active_role)
-	if !slices.Contains([]string(completeProfile.User.Roles), "artisan") {
+	if !slices.Contains([]string(resp.User.Roles), "artisan") {
 		return nil, internal.ErrUnauthorizedAction
 	}
 
-	return completeProfile, nil
+	if resp.Profile == nil {
+		// No side effects here; keep semantics explicit.
+		return nil, user.ErrProfileNotFound
+	}
+
+	// Return a CompleteUserProfile since CreateProfile/GetProfile use it for response building.
+	out := &user.CompleteUserProfile{
+		User: user.User{
+			ID:            resp.User.ID,
+			Email:         resp.User.Email,
+			EmailVerified: resp.User.EmailVerified,
+			Roles:         resp.User.Roles,
+			ActiveRole:    resp.User.ActiveRole,
+			CreatedAt:     resp.User.CreatedAt,
+			UpdatedAt:     resp.User.UpdatedAt,
+		},
+		Profile:  *resp.Profile,
+		Settings: user.UserSettings{}, // not requested here
+	}
+	return out, nil
 }
 
 // validateBasicProfileComplete checks if user's basic profile is complete before allowing artisan profile creation
-func (s *ProfileService) validateBasicProfileComplete(completeProfile *user.CompleteUserProfile) error {
+func (s *ProfileService) validateBasicProfileComplete(profile *user.UserProfile) error {
 	var missingFields []string
 
-	if strings.TrimSpace(completeProfile.Profile.FirstName) == "" {
+	if profile == nil {
+		return fmt.Errorf("please complete your basic profile information first")
+	}
+
+	if strings.TrimSpace(profile.FirstName) == "" {
 		missingFields = append(missingFields, "first_name")
 	}
-	if strings.TrimSpace(completeProfile.Profile.LastName) == "" {
+	if strings.TrimSpace(profile.LastName) == "" {
 		missingFields = append(missingFields, "last_name")
 	}
-	if strings.TrimSpace(completeProfile.Profile.Phone) == "" {
+	if strings.TrimSpace(profile.Phone) == "" {
 		missingFields = append(missingFields, "phone")
 	}
-	if strings.TrimSpace(completeProfile.Profile.AvatarURL) == "" {
+	if strings.TrimSpace(profile.AvatarURL) == "" {
 		missingFields = append(missingFields, "avatar_url")
 	}
 
 	if len(missingFields) > 0 {
-		return fmt.Errorf("please complete your basic profile information first. The following fields are required: %s",
-			strings.Join(missingFields, ", "))
+		return fmt.Errorf(
+			"please complete your basic profile information first. The following fields are required: %s",
+			strings.Join(missingFields, ", "),
+		)
 	}
-
 	return nil
 }
 
