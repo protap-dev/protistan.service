@@ -128,22 +128,32 @@ func (s *Service) GetProfile(ctx context.Context) (*CustomerProfile, error) {
 		return nil, ErrUnauthenticated
 	}
 
-	// Convert UUID to string properly for service-to-service calls
 	userIDStr := string(userID)
 	s.logger.LogUserAction(ctx, "get_profile", userIDStr)
 
-	// Convert string to UUID for service call
 	userUUID, err := uuid.FromString(userIDStr)
 	if err != nil {
 		s.logger.LogError(ctx, "invalid_uuid_format", err)
 		return nil, ErrUnauthenticated
 	}
 
-	// Call user service for profile data (service-to-service RPC)
-	completeProfile, err := user.GetCompleteProfileByUserID(ctx, userUUID)
+	// Call user service using consolidated internal API
+	resp, err := user.FetchInternal(ctx, &user.InternalUserFetchRequest{
+		UserID: userUUID,
+
+		IncludeUser:     true,
+		IncludeProfile:  true,
+		IncludeSettings: true,
+
+		EnsureProfile:  false, // Don't create profile if it doesn't exist
+		EnsureSettings: true,  // Ensure default settings are created
+	})
 	if err != nil {
-		s.logger.LogError(ctx, "get_user_profile", err)
+		s.logger.LogError(ctx, "fetch_user_internal", err)
 		return nil, err
+	}
+	if resp.User == nil || resp.Profile == nil || resp.Settings == nil {
+		return nil, ErrUnauthenticated
 	}
 
 	// Fetch customer-specific addresses
@@ -155,17 +165,17 @@ func (s *Service) GetProfile(ctx context.Context) (*CustomerProfile, error) {
 
 	return &CustomerProfile{
 		User: CustomerUserDTO{
-			ID:              completeProfile.User.ID,
-			Email:           completeProfile.User.Email,
-			EmailVerified:   completeProfile.User.EmailVerified,
-			RolesEnabled:    []string(completeProfile.User.Roles),
-			ActiveRole:      completeProfile.User.ActiveRole, // pointer
-			ProfileComplete: completeProfile.User.ProfileComplete,
-			CreatedAt:       completeProfile.User.CreatedAt,
-			UpdatedAt:       completeProfile.User.UpdatedAt,
+			ID:              resp.User.ID,
+			Email:           resp.User.Email,
+			EmailVerified:   resp.User.EmailVerified,
+			RolesEnabled:    []string(resp.User.Roles),
+			ActiveRole:      resp.User.ActiveRole,
+			ProfileComplete: resp.User.ProfileComplete,
+			CreatedAt:       resp.User.CreatedAt,
+			UpdatedAt:       resp.User.UpdatedAt,
 		},
-		Profile:   completeProfile.Profile,
-		Settings:  completeProfile.Settings,
+		Profile:   *resp.Profile,
+		Settings:  *resp.Settings,
 		Addresses: addresses,
 	}, nil
 }
