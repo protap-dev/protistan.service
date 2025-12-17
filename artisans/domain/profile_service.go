@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"slices"
 	"strings"
 	"time"
 
@@ -155,7 +156,7 @@ func (s *ProfileService) CreateProfile(ctx context.Context, userCtx *internal.Us
 				ID:         completeProfile.User.ID,
 				Email:      completeProfile.User.Email,
 				Roles:      completeProfile.User.Roles,
-				ActiveRole: completeProfile.User.ActiveRole,
+				ActiveRole: internal.GetActiveRole(completeProfile.User.ActiveRole),
 			},
 			Profile: ProfileData{
 				FirstName: completeProfile.Profile.FirstName,
@@ -416,7 +417,7 @@ func (s *ProfileService) GetProfile(ctx context.Context, userCtx *internal.UserC
 				ID:         completeProfile.User.ID,
 				Email:      completeProfile.User.Email,
 				Roles:      completeProfile.User.Roles,
-				ActiveRole: completeProfile.User.ActiveRole,
+				ActiveRole: internal.GetActiveRole(completeProfile.User.ActiveRole),
 			},
 			Profile: ProfileData{
 				FirstName: completeProfile.Profile.FirstName,
@@ -446,12 +447,12 @@ func (s *ProfileService) verifyArtisanUser(ctx context.Context, userUUID uuid.UU
 		s.logger.LogError(ctx, "get_user_profile", err)
 		return nil, err
 	}
-
 	if completeProfile == nil {
 		return nil, internal.ErrUnauthorizedAction
 	}
 
-	if completeProfile.User.ActiveRole != "artisan" {
+	// Authorize by roles_enabled (not active_role)
+	if !slices.Contains([]string(completeProfile.User.Roles), "artisan") {
 		return nil, internal.ErrUnauthorizedAction
 	}
 

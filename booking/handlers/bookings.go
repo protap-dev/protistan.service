@@ -263,7 +263,7 @@ func (h *BookingsHandler) UpdateBookingStatus(ctx context.Context, id string, re
 		return nil, err
 	}
 
-	userRole, err := h.getUserRole(ctx, userCtx.ID)
+	userRole, err := h.getActiveRole(ctx)
 	if err != nil {
 		return nil, err
 	}
@@ -347,7 +347,7 @@ func (h *BookingsHandler) ListBookings(ctx context.Context, params *ListBookings
 		return nil, err
 	}
 
-	userRole, err := h.getUserRole(ctx, userCtx.ID)
+	userRole, err := h.getActiveRole(ctx)
 	if err != nil {
 		return nil, err
 	}
@@ -580,19 +580,18 @@ func (h *BookingsHandler) UpdateBookingStatusInternal(ctx context.Context, booki
 	return nil
 }
 
-func (h *BookingsHandler) getUserRole(ctx context.Context, userID string) (string, error) {
-	userUUID, err := uuid.FromString(userID)
+func (h *BookingsHandler) getActiveRole(ctx context.Context) (string, error) {
+	// Use user service API (same as client) for consistent data access
+	profileResp, err := user.GetProfile(ctx)
 	if err != nil {
-		return "", fmt.Errorf("invalid user_id format: %w", err)
-	}
-	u, err := user.GetUserByID(ctx, userUUID)
-	if err != nil {
-		h.logger.Error(ctx, "failed to get user role", err, map[string]any{
+		userID := binternal.ExtractUserIDFromContext()
+		h.logger.Error(ctx, "failed to get user profile", err, map[string]any{
 			"user_id": userID,
 		})
-		return "", fmt.Errorf("failed to get user role: %w", err)
+		return "", fmt.Errorf("failed to get user profile: %w", err)
 	}
-	return u.ActiveRole, nil
+
+	return binternal.GetActiveRole(profileResp.User.ActiveRole), nil
 }
 
 func (h *BookingsHandler) toResponse(booking *domain.Booking) *BookingResponse {

@@ -267,7 +267,7 @@ func (s *SearchService) executeSearchQuery(ctx context.Context, input *SearchInp
 				ID:              result.UserID,
 				Email:           result.UserEmail,
 				Roles:           user.StringArray(result.UserRoles),
-				ActiveRole:      result.UserActiveRole,
+				ActiveRole:      &result.UserActiveRole,
 				EmailVerified:   result.UserEmailVerified,
 				ProfileComplete: result.UserProfileComplete,
 				CreatedAt:       result.UserCreatedAt,
