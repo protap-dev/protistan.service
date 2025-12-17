@@ -174,6 +174,45 @@ type UpdateSettingsRequest struct {
 	Timezone           *string `json:"timezone,omitempty"`
 }
 
+// ============================================================================
+// INTERNAL API REQUEST/RESPONSE TYPES
+// ============================================================================
+
+type InternalUserFetchRequest struct {
+	UserID uuid.UUID `json:"user_id"`
+
+	IncludeUser          bool `json:"include_user"`
+	IncludeProfile       bool `json:"include_profile"`
+	IncludeSettings      bool `json:"include_settings"`
+	IncludePublicProfile bool `json:"include_public_profile"`
+	IncludeOnboarding    bool `json:"include_onboarding"`
+
+	// Prevent accidental writes: only create defaults when explicitly requested
+	EnsureProfile  bool `json:"ensure_profile"`
+	EnsureSettings bool `json:"ensure_settings"`
+}
+
+type InternalUserFetchResponse struct {
+	User          *InternalUserDTO   `json:"user,omitempty"`
+	Profile       *UserProfile       `json:"profile,omitempty"`
+	Settings      *UserSettings      `json:"settings,omitempty"`
+	PublicProfile *PublicUserProfile `json:"public_profile,omitempty"`
+
+	OnboardingState *string  `json:"onboarding_state,omitempty"`
+	MissingFields   []string `json:"missing_fields,omitempty"`
+}
+
+type InternalUserDTO struct {
+	ID              string      `json:"id"`
+	Email           string      `json:"email"`
+	EmailVerified   bool        `json:"email_verified"`
+	Roles           StringArray `json:"roles"`
+	ActiveRole      *string     `json:"active_role"`
+	ProfileComplete bool        `json:"profile_complete"`
+	CreatedAt       time.Time   `json:"created_at"`
+	UpdatedAt       time.Time   `json:"updated_at"`
+}
+
 type UserProfileResponse struct {
 	User struct {
 		ID              string    `json:"id"`
@@ -202,7 +241,7 @@ func (s *Service) getProfileResponse(ctx context.Context, userID string) (*UserP
 			return err
 		}
 
-		onboardingState, missing := s.computeOnboardingState(ctx, u, p)
+		onboardingState, missing := s.computeOnboardingState(ctx, tx, u, p)
 
 		resp := &UserProfileResponse{
 			Profile:         *p,
@@ -418,56 +457,131 @@ func (s *Service) UpdateSettings(ctx context.Context, req *UpdateSettingsRequest
 // INTERNAL APIs (for service-to-service calls)
 // ============================================================================
 
-// GetUserByID - Internal API for other services
+// FetchInternal - Consolidated Internal API with flexible include masks
 //
-//encore:api private method=GET path=/internal/user/:userID
-func (s *Service) GetUserByID(ctx context.Context, userID uuid.UUID) (*User, error) {
-	user, err := s.userRepo.GetByID(ctx, userID.String())
+//encore:api private method=POST path=/internal/user/fetch
+func (s *Service) FetchInternal(ctx context.Context, req *InternalUserFetchRequest) (*InternalUserFetchResponse, error) {
+	if req == nil {
+		return nil, errs.B().Msg("invalid request").Err()
+	}
+
+	userID := req.UserID.String()
+	out := &InternalUserFetchResponse{}
+
+	// Determine what we actually need to load
+	needProfile := req.IncludeProfile || req.IncludePublicProfile || req.IncludeOnboarding || req.EnsureProfile
+	needSettings := req.IncludeSettings || req.IncludeOnboarding || req.EnsureSettings
+	needUser := req.IncludeUser || req.IncludeOnboarding
+
+	// If we might write (ensure_*), use a transaction; otherwise use a simple read-only context.
+	readOnly := !req.EnsureProfile && !req.EnsureSettings
+
+	var err error
+	if readOnly {
+		// No writes expected: avoid transactional overhead.
+		tx := s.coreSvc.DB().WithContext(ctx)
+		err = s.fetchInternalWithTx(ctx, tx, req, userID, out, needUser, needProfile, needSettings)
+	} else {
+		// Writes possible: wrap in a transaction.
+		err = s.coreSvc.DB().WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+			return s.fetchInternalWithTx(ctx, tx, req, userID, out, needUser, needProfile, needSettings)
+		})
+	}
+
 	if err != nil {
-		s.logger.LogError(ctx, "get_user_by_id", err)
+		s.logger.LogError(ctx, "fetch_internal", err)
 		return nil, err
 	}
-	return user, nil
+	return out, nil
 }
 
-// GetProfileByUserID - Internal API
-//
-//encore:api private method=GET path=/internal/user/:userID/profile
-func (s *Service) GetProfileByUserID(ctx context.Context, userID uuid.UUID) (*UserProfile, error) {
-	profile, err := s.profileRepo.GetByUserID(ctx, userID.String())
-	if err != nil {
-		s.logger.LogError(ctx, "get_profile_by_user_id", err)
-		return nil, err
-	}
-	return profile, nil
-}
+// fetchInternalWithTx handles the actual data fetching within a transaction
+func (s *Service) fetchInternalWithTx(
+	ctx context.Context,
+	tx *gorm.DB,
+	req *InternalUserFetchRequest,
+	userID string,
+	out *InternalUserFetchResponse,
+	needUser, needProfile, needSettings bool,
+) error {
+	var profileRepo ProfileRepository
+	var settingsRepo SettingsRepository
 
-// GetPublicProfileByUserID - Internal API for public data only
-//
-//encore:api private method=GET path=/internal/user/:userID/public
-func (s *Service) GetPublicProfileByUserID(ctx context.Context, userID uuid.UUID) (*PublicUserProfile, error) {
-	profile, err := s.profileRepo.GetByUserID(ctx, userID.String())
-	if err != nil {
-		s.logger.LogError(ctx, "get_public_profile_by_user_id", err)
-		return nil, err
+	if needProfile {
+		profileRepo = s.profileRepoForTx(tx)
+	}
+	if needSettings {
+		settingsRepo = s.settingsRepoForTx(tx)
 	}
 
-	// Return only public fields - no private data
-	publicProfile := &PublicUserProfile{
-		FirstName: profile.FirstName,
-		LastName:  profile.LastName,
-		AvatarURL: profile.AvatarURL,
+	// 1) User
+	var u *User
+	if needUser {
+		var err error
+		u, err = s.fetchUserThinTx(ctx, tx, userID)
+		if err != nil {
+			return err
+		}
+		if req.IncludeUser {
+			out.User = s.toInternalUserDTO(u)
+		}
 	}
 
-	s.logger.LogUserAction(ctx, "get_public_profile", userID.String())
-	return publicProfile, nil
-}
+	// 2) Profile (public-only OR full)
+	var p *UserProfile
+	if needProfile {
+		publicOnly := req.IncludePublicProfile && !req.IncludeProfile && !req.IncludeOnboarding
 
-// GetCompleteProfileByUserID - Internal API
-//
-//encore:api private method=GET path=/internal/user/:userID/complete
-func (s *Service) GetCompleteProfileByUserID(ctx context.Context, userID uuid.UUID) (*CompleteUserProfile, error) {
-	return s.getCompleteProfile(ctx, userID.String())
+		if publicOnly {
+			pub, err := s.fetchPublicProfileOnlyTx(tx, userID, req.EnsureProfile)
+			if err != nil {
+				return err
+			}
+			out.PublicProfile = pub
+		} else {
+			prof, err := s.fetchFullProfileTx(ctx, profileRepo, userID, req.EnsureProfile)
+			if err != nil {
+				return err
+			}
+			p = prof
+
+			if req.IncludeProfile {
+				out.Profile = p
+			}
+			if req.IncludePublicProfile {
+				out.PublicProfile = &PublicUserProfile{
+					FirstName: p.FirstName,
+					LastName:  p.LastName,
+					AvatarURL: p.AvatarURL,
+				}
+			}
+		}
+	}
+
+	// 3) Settings
+	var st *UserSettings
+	if needSettings {
+		settings, err := s.fetchSettingsTx(ctx, settingsRepo, userID, req.EnsureSettings)
+		if err != nil {
+			return err
+		}
+		st = settings
+		if req.IncludeSettings {
+			out.Settings = st
+		}
+	}
+
+	// 4) Onboarding (now no dead code)
+	if req.IncludeOnboarding {
+		if err := s.requireOnboardingInputs(u, p); err != nil {
+			return err
+		}
+		state, missing := s.computeOnboardingState(ctx, tx, u, p)
+		out.OnboardingState = &state
+		out.MissingFields = missing
+	}
+
+	return nil
 }
 
 // ============================================================================
@@ -475,7 +589,7 @@ func (s *Service) GetCompleteProfileByUserID(ctx context.Context, userID uuid.UU
 // ============================================================================
 
 // computeOnboardingState determines the user's onboarding state and missing fields
-func (s *Service) computeOnboardingState(ctx context.Context, user *User, profile *UserProfile) (string, []string) {
+func (s *Service) computeOnboardingState(ctx context.Context, db *gorm.DB, user *User, profile *UserProfile) (string, []string) {
 	var missing []string
 
 	// -------------------------
@@ -526,7 +640,7 @@ func (s *Service) computeOnboardingState(ctx context.Context, user *User, profil
 	switch activeRole {
 	case "customer":
 		var addressCount int64
-		if err := s.coreSvc.DB().WithContext(ctx).
+		if err := db.WithContext(ctx).
 			Table("customer_addresses").
 			Where("user_id = ?", user.ID).
 			Count(&addressCount).Error; err != nil {
@@ -547,7 +661,7 @@ func (s *Service) computeOnboardingState(ctx context.Context, user *User, profil
 			AvailabilityStatus string
 		}
 		var a artisanRow
-		if err := s.coreSvc.DB().WithContext(ctx).
+		if err := db.WithContext(ctx).
 			Table("artisans").
 			Select("id, rates_count, availability_status").
 			Where("user_id = ?", user.ID).
@@ -564,7 +678,7 @@ func (s *Service) computeOnboardingState(ctx context.Context, user *User, profil
 		verificationRequired := false // TODO: wire from config when you want to enforce it
 		if verificationRequired {
 			var status string
-			err := s.coreSvc.DB().WithContext(ctx).
+			err := db.WithContext(ctx).
 				Table("artisan_verifications").
 				Select("verification_status").
 				Where("artisan_id = ?", a.ID).
@@ -589,33 +703,6 @@ func (s *Service) computeOnboardingState(ctx context.Context, user *User, profil
 }
 func contains(list []string, v string) bool {
 	return slices.Contains(list, v)
-}
-
-func (s *Service) getCompleteProfile(ctx context.Context, userID string) (*CompleteUserProfile, error) {
-	var result *CompleteUserProfile
-
-	err := s.coreSvc.DB().WithContext(ctx).Transaction(func(tx *gorm.DB) error {
-		u, p, st, err := s.getOrCreateUserProfileSettingsTx(ctx, tx, userID)
-		if err != nil {
-			return err
-		}
-
-		onboardingState, missingFields := s.computeOnboardingState(ctx, u, p)
-
-		result = &CompleteUserProfile{
-			User:            *u,
-			Profile:         *p,
-			Settings:        *st,
-			OnboardingState: onboardingState,
-			MissingFields:   missingFields,
-		}
-		return nil
-	})
-	if err != nil {
-		return nil, err
-	}
-
-	return result, nil
 }
 
 func (s *Service) getOrCreateUserProfileSettingsTx(
@@ -667,4 +754,18 @@ func (s *Service) getOrCreateUserProfileSettingsTx(
 	}
 
 	return u, p, st, nil
+}
+
+// ============================================================================
+// TRANSACTION HELPER METHODS
+// ============================================================================
+
+// profileRepoForTx creates a profile repository within the given transaction
+func (s *Service) profileRepoForTx(tx *gorm.DB) ProfileRepository {
+	return NewProfileRepository(tx)
+}
+
+// settingsRepoForTx creates a settings repository within the given transaction
+func (s *Service) settingsRepoForTx(tx *gorm.DB) SettingsRepository {
+	return NewSettingsRepository(tx)
 }

@@ -5,9 +5,6 @@ import (
 	"context"
 	"strings"
 	"testing"
-
-	"encore.dev/beta/errs"
-	"encore.dev/types/uuid"
 )
 
 // Test cases for GetProfile API endpoint
@@ -336,143 +333,6 @@ func TestService_UpdateSettings(t *testing.T) {
 	}
 }
 
-// Test cases for internal API endpoints
-func TestService_GetUserByID(t *testing.T) {
-	tests := []struct {
-		name           string
-		userID         string
-		setupMocks     func(*mockUserRepository, *mockProfileRepository, *mockSettingsRepository, *mockUserValidator, *mockServiceLogger)
-		expectedResult *User
-		expectedError  error
-	}{
-		{
-			name:   "successful user retrieval",
-			userID: "550e8400-e29b-41d4-a716-446655440000", // Valid UUID format
-			setupMocks: func(userRepo *mockUserRepository, profileRepo *mockProfileRepository, settingsRepo *mockSettingsRepository, validator *mockUserValidator, logger *mockServiceLogger) {
-				user := createTestUser("550e8400-e29b-41d4-a716-446655440000")
-				userRepo.users["550e8400-e29b-41d4-a716-446655440000"] = user
-			},
-			expectedResult: createTestUser("550e8400-e29b-41d4-a716-446655440000"),
-			expectedError:  nil,
-		},
-		{
-			name:   "user not found",
-			userID: "550e8400-e29b-41d4-a716-446655440001", // Different UUID that won't exist
-			setupMocks: func(userRepo *mockUserRepository, profileRepo *mockProfileRepository, settingsRepo *mockSettingsRepository, validator *mockUserValidator, logger *mockServiceLogger) {
-				// No user setup - user doesn't exist
-			},
-			expectedResult: nil,
-			expectedError:  ErrUserNotFound,
-		},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			service, userRepo, profileRepo, settingsRepo, validator, logger := createTestService()
-
-			tt.setupMocks(userRepo, profileRepo, settingsRepo, validator, logger)
-
-			userUUID, err := uuid.FromString(tt.userID)
-			if err != nil {
-				t.Fatalf("Failed to parse UUID %s: %v", tt.userID, err)
-			}
-			result, err := service.GetUserByID(context.Background(), userUUID)
-
-			if tt.expectedError == nil {
-				if err != nil {
-					t.Errorf("GetUserByID() error = %v, expected no error", err)
-				}
-				if result == nil {
-					t.Errorf("GetUserByID() result = nil, expected user")
-				}
-			} else {
-				if err == nil {
-					t.Errorf("GetUserByID() error = nil, expected error %v", tt.expectedError)
-				} else if err.Error() != tt.expectedError.Error() {
-					t.Errorf("GetUserByID() error = %v, expected error %v", err, tt.expectedError)
-				}
-			}
-		})
-	}
-}
-
-// Test cases for getCompleteProfile helper method
-func TestService_getCompleteProfile(t *testing.T) {
-	tests := []struct {
-		name           string
-		userID         string
-		setupMocks     func(*mockUserRepository, *mockProfileRepository, *mockSettingsRepository, *mockUserValidator, *mockServiceLogger)
-		expectedResult *CompleteUserProfile
-		expectedError  error
-	}{
-		{
-			name:   "all data exists",
-			userID: "550e8400-e29b-41d4-a716-446655440000",
-			setupMocks: func(userRepo *mockUserRepository, profileRepo *mockProfileRepository, settingsRepo *mockSettingsRepository, validator *mockUserValidator, logger *mockServiceLogger) {
-				user := createTestUser("550e8400-e29b-41d4-a716-446655440000")
-				profile := createTestProfile("550e8400-e29b-41d4-a716-446655440000")
-				settings := createTestSettings("550e8400-e29b-41d4-a716-446655440000")
-
-				userRepo.users["550e8400-e29b-41d4-a716-446655440000"] = user
-				profileRepo.profiles["550e8400-e29b-41d4-a716-446655440000"] = profile
-				settingsRepo.settings["550e8400-e29b-41d4-a716-446655440000"] = settings
-			},
-			expectedResult: &CompleteUserProfile{
-				User:     *createTestUser("550e8400-e29b-41d4-a716-446655440000"),
-				Profile:  *createTestProfile("550e8400-e29b-41d4-a716-446655440000"),
-				Settings: *createTestSettings("550e8400-e29b-41d4-a716-446655440000"),
-			},
-			expectedError: nil,
-		},
-		{
-			name:   "user not found",
-			userID: "550e8400-e29b-41d4-a716-446655440001",
-			setupMocks: func(userRepo *mockUserRepository, profileRepo *mockProfileRepository, settingsRepo *mockSettingsRepository, validator *mockUserValidator, logger *mockServiceLogger) {
-				// No setup - user doesn't exist
-			},
-			expectedResult: nil,
-			expectedError:  ErrUserNotFound,
-		},
-		{
-			name:   "profile creation fails",
-			userID: "550e8400-e29b-41d4-a716-446655440002",
-			setupMocks: func(userRepo *mockUserRepository, profileRepo *mockProfileRepository, settingsRepo *mockSettingsRepository, validator *mockUserValidator, logger *mockServiceLogger) {
-				user := createTestUser("550e8400-e29b-41d4-a716-446655440002")
-				userRepo.users["550e8400-e29b-41d4-a716-446655440002"] = user
-				// Configure profile repo to fail creation
-				profileRepo.SetShouldFailCreate(true)
-			},
-			expectedResult: nil,
-			expectedError:  errs.B().Msg("failed to create profile").Err(),
-		},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			service, userRepo, profileRepo, settingsRepo, validator, logger := createTestService()
-
-			tt.setupMocks(userRepo, profileRepo, settingsRepo, validator, logger)
-
-			result, err := service.getCompleteProfile(context.Background(), tt.userID)
-
-			if tt.expectedError == nil {
-				if err != nil {
-					t.Errorf("getCompleteProfile() error = %v, expected no error", err)
-				}
-				if result == nil {
-					t.Errorf("getCompleteProfile() result = nil, expected profile")
-				}
-			} else {
-				if err == nil {
-					t.Errorf("getCompleteProfile() error = nil, expected error %v", tt.expectedError)
-				} else if err.Error() != tt.expectedError.Error() {
-					t.Errorf("getCompleteProfile() error = %v, expected error %v", err, tt.expectedError)
-				}
-			}
-		})
-	}
-}
-
 // Test cases for concurrent access safety
 func TestService_ConcurrentAccess(t *testing.T) {
 	service, _, _, _, _, _ := createTestService()
@@ -509,74 +369,6 @@ func TestService_ConcurrentAccess(t *testing.T) {
 	}
 }
 
-// Test cases for error handling edge cases
-func TestService_ErrorHandling(t *testing.T) {
-	tests := []struct {
-		name          string
-		setupMocks    func(*mockUserRepository, *mockProfileRepository, *mockSettingsRepository, *mockUserValidator, *mockServiceLogger)
-		testFunction  func(*Service) error
-		expectedError error
-	}{
-		{
-			name: "unauthenticated access",
-			setupMocks: func(userRepo *mockUserRepository, profileRepo *mockProfileRepository, settingsRepo *mockSettingsRepository, validator *mockUserValidator, logger *mockServiceLogger) {
-				// No setup needed
-			},
-			testFunction: func(service *Service) error {
-				_, err := service.GetProfile(context.Background())
-				return err
-			},
-			expectedError: ErrUnauthenticated,
-		},
-		{
-			name: "repository error handling",
-			setupMocks: func(userRepo *mockUserRepository, profileRepo *mockProfileRepository, settingsRepo *mockSettingsRepository, validator *mockUserValidator, logger *mockServiceLogger) {
-				// Don't set up any data - should cause errors
-			},
-			testFunction: func(service *Service) error {
-				// Create a service with a mock that will fail
-				mockUserRepo := NewMockUserRepository()
-				service.userRepo = mockUserRepo
-				userUUID, err := uuid.FromString("550e8400-e29b-41d4-a716-446655440004")
-				if err != nil {
-					return err
-				}
-				_, err = service.GetUserByID(context.Background(), userUUID)
-				return err
-			},
-			expectedError: ErrUserNotFound,
-		},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			service := &Service{
-				userRepo:     NewMockUserRepository(),
-				profileRepo:  NewMockProfileRepository(),
-				settingsRepo: NewMockSettingsRepository(),
-				validator:    NewMockUserValidator(),
-				logger:       NewMockServiceLogger(),
-			}
-
-			tt.setupMocks(nil, nil, nil, nil, nil)
-
-			err := tt.testFunction(service)
-
-			if tt.expectedError == nil {
-				if err != nil {
-					t.Errorf("testFunction() error = %v, expected no error", err)
-				}
-			} else {
-				if err == nil {
-					t.Errorf("testFunction() error = nil, expected error %v", tt.expectedError)
-				} else if err.Error() != tt.expectedError.Error() {
-					t.Errorf("testFunction() error = %v, expected error %v", err, tt.expectedError)
-				}
-			}
-		})
-	}
-}
-
 // Test service initialization
 func TestService_Initialization(t *testing.T) {
 	// Test that the service initializes correctly with all dependencies
@@ -584,6 +376,7 @@ func TestService_Initialization(t *testing.T) {
 
 	if service == nil {
 		t.Error("Service should not be nil after initialization")
+		return
 	}
 	if service.userRepo == nil {
 		t.Error("Service userRepo should not be nil")
