@@ -480,13 +480,14 @@ func (s *ProfileService) verifyArtisanUser(ctx context.Context, userUUID uuid.UU
 	// Return a CompleteUserProfile since CreateProfile/GetProfile use it for response building.
 	out := &user.CompleteUserProfile{
 		User: user.User{
-			ID:            resp.User.ID,
-			Email:         resp.User.Email,
-			EmailVerified: resp.User.EmailVerified,
-			Roles:         resp.User.Roles,
-			ActiveRole:    resp.User.ActiveRole,
-			CreatedAt:     resp.User.CreatedAt,
-			UpdatedAt:     resp.User.UpdatedAt,
+			ID:              resp.User.ID,
+			Email:           resp.User.Email,
+			EmailVerified:   resp.User.EmailVerified,
+			Roles:           resp.User.Roles,
+			ActiveRole:      resp.User.ActiveRole,
+			ProfileComplete: resp.User.ProfileComplete,
+			CreatedAt:       resp.User.CreatedAt,
+			UpdatedAt:       resp.User.UpdatedAt,
 		},
 		Profile:  *resp.Profile,
 		Settings: user.UserSettings{}, // not requested here
