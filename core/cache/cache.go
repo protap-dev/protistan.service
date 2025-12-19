@@ -34,6 +34,9 @@ type CacheManager interface {
 	// Delete removes an item from cache
 	Delete(ctx context.Context, key string) error
 
+	// DeleteByPrefix removes all items with keys starting with the given prefix
+	DeleteByPrefix(ctx context.Context, prefix string) error
+
 	// Clear removes all items from cache
 	Clear(ctx context.Context) error
 
@@ -109,6 +112,117 @@ func (m *CacheMetrics) HitRate() float64 {
 }
 
 // ============================================================================
+// TRIE FOR PREFIX-BASED OPERATIONS
+// ============================================================================
+
+// TrieNode represents a node in the prefix tree
+type TrieNode struct {
+	children map[rune]*TrieNode
+	isKey    bool // Marks if this node represents the end of a complete key
+}
+
+// NewTrieNode creates a new Trie node
+func NewTrieNode() *TrieNode {
+	return &TrieNode{
+		children: make(map[rune]*TrieNode),
+		isKey:    false,
+	}
+}
+
+// Trie represents a prefix tree for efficient key indexing
+type Trie struct {
+	root *TrieNode
+	mu   sync.RWMutex
+}
+
+// NewTrie creates a new Trie
+func NewTrie() *Trie {
+	return &Trie{
+		root: NewTrieNode(),
+	}
+}
+
+// Insert adds a key to the trie
+func (t *Trie) Insert(key string) {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+
+	node := t.root
+	for _, char := range key {
+		if _, exists := node.children[char]; !exists {
+			node.children[char] = NewTrieNode()
+		}
+		node = node.children[char]
+	}
+	node.isKey = true
+}
+
+// Delete removes a key from the trie
+func (t *Trie) Delete(key string) {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+
+	t.deleteHelper(t.root, key, 0)
+}
+
+// deleteHelper recursively removes nodes that are no longer needed
+func (t *Trie) deleteHelper(node *TrieNode, key string, index int) bool {
+	if index == len(key) {
+		if !node.isKey {
+			return false // Key doesn't exist
+		}
+		node.isKey = false
+		// Delete node if it has no children
+		return len(node.children) == 0
+	}
+
+	char := rune(key[index])
+	child, exists := node.children[char]
+	if !exists {
+		return false // Key doesn't exist
+	}
+
+	shouldDeleteChild := t.deleteHelper(child, key, index+1)
+	if shouldDeleteChild {
+		delete(node.children, char)
+		// Delete current node if it's not a key and has no children
+		return !node.isKey && len(node.children) == 0
+	}
+
+	return false
+}
+
+// FindPrefix finds all keys that start with the given prefix
+func (t *Trie) FindPrefix(prefix string) []string {
+	t.mu.RLock()
+	defer t.mu.RUnlock()
+
+	node := t.root
+	for _, char := range prefix {
+		child, exists := node.children[char]
+		if !exists {
+			return nil // No keys with this prefix
+		}
+		node = child
+	}
+
+	var keys []string
+	t.collectKeys(node, prefix, &keys)
+	return keys
+}
+
+// collectKeys recursively collects all keys from a node
+func (t *Trie) collectKeys(node *TrieNode, prefix string, keys *[]string) {
+	if node.isKey {
+		*keys = append(*keys, prefix)
+	}
+
+	for char, child := range node.children {
+		t.collectKeys(child, prefix+string(char), keys)
+	}
+}
+
+// ============================================================================
 // IN-MEMORY CACHE IMPLEMENTATION
 // ============================================================================
 
@@ -123,6 +237,7 @@ type InMemoryCache struct {
 	config       *CacheConfig
 	metrics      *CacheMetrics
 	stopCleanup  chan struct{}
+	keyTrie      *Trie // Trie for efficient prefix-based operations
 }
 
 // CacheEntry holds cached data with expiration time, version, and size
@@ -162,6 +277,7 @@ func NewInMemoryCacheWithConfig(config *CacheConfig) CacheManager {
 		config:       config,
 		metrics:      &CacheMetrics{},
 		stopCleanup:  make(chan struct{}),
+		keyTrie:      NewTrie(),
 	}
 
 	// Start cleanup goroutine
@@ -389,6 +505,11 @@ func (c *InMemoryCache) SetWithVersion(ctx context.Context, key string, value an
 
 	c.cache[key] = newEntry
 
+	// Add to Trie for efficient prefix operations
+	if !exists {
+		c.keyTrie.Insert(key)
+	}
+
 	if c.config.EnableMetrics {
 		c.metrics.Sets.Add(1)
 	}
@@ -415,6 +536,9 @@ func (c *InMemoryCache) Delete(ctx context.Context, key string) error {
 		c.removeEntry(entry)
 		delete(c.cache, key)
 
+		// Remove from Trie
+		c.keyTrie.Delete(key)
+
 		if c.config.EnableMetrics {
 			c.metrics.Deletes.Add(1)
 		}
@@ -422,6 +546,45 @@ func (c *InMemoryCache) Delete(ctx context.Context, key string) error {
 		// Notify listeners of invalidation
 		c.notifyInvalidation(key, entry.version+1)
 	}
+	return nil
+}
+
+// DeleteByPrefix removes all items with keys starting with the given prefix
+func (c *InMemoryCache) DeleteByPrefix(ctx context.Context, prefix string) error {
+	select {
+	case <-ctx.Done():
+		return ctx.Err()
+	default:
+	}
+
+	// Use Trie to efficiently find all keys with the given prefix
+	keysToDelete := c.keyTrie.FindPrefix(prefix)
+
+	if len(keysToDelete) == 0 {
+		return nil
+	}
+
+	c.mu.Lock()
+	defer c.mu.Unlock()
+
+	for _, key := range keysToDelete {
+		if entry, exists := c.cache[key]; exists {
+			nextVersion := entry.version + 1
+
+			c.removeEntry(entry)
+			delete(c.cache, key)
+
+			// Remove from Trie
+			c.keyTrie.Delete(key)
+
+			if c.config.EnableMetrics {
+				c.metrics.Deletes.Add(1)
+			}
+
+			c.notifyInvalidation(key, nextVersion)
+		}
+	}
+
 	return nil
 }
 
@@ -449,6 +612,7 @@ func (c *InMemoryCache) Clear(ctx context.Context) error {
 	c.cache = make(map[string]*CacheEntry)
 	c.evictionList = list.New()
 	c.evictionMap = make(map[string]*list.Element)
+	c.keyTrie = NewTrie() // Reset Trie
 	c.metrics.Size.Store(0)
 	c.metrics.Entries.Store(0)
 
