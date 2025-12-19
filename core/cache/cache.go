@@ -34,6 +34,9 @@ type CacheManager interface {
 	// Delete removes an item from cache
 	Delete(ctx context.Context, key string) error
 
+	// DeleteByPrefix removes all items with keys starting with the given prefix
+	DeleteByPrefix(ctx context.Context, prefix string) error
+
 	// Clear removes all items from cache
 	Clear(ctx context.Context) error
 
@@ -422,6 +425,47 @@ func (c *InMemoryCache) Delete(ctx context.Context, key string) error {
 		// Notify listeners of invalidation
 		c.notifyInvalidation(key, entry.version+1)
 	}
+	return nil
+}
+
+// DeleteByPrefix removes all items with keys starting with the given prefix
+func (c *InMemoryCache) DeleteByPrefix(ctx context.Context, prefix string) error {
+	select {
+	case <-ctx.Done():
+		return ctx.Err()
+	default:
+	}
+
+	c.mu.Lock()
+	defer c.mu.Unlock()
+
+	// Collect keys to delete
+	var keysToDelete []string
+
+	// Phase 1: Identify keys (Read-only)
+	for key := range c.cache {
+		if len(key) >= len(prefix) && key[:len(prefix)] == prefix {
+			keysToDelete = append(keysToDelete, key)
+		}
+	}
+
+	// Phase 2: Perform deletion and cleanup (Modification)
+	for _, key := range keysToDelete {
+		if entry, exists := c.cache[key]; exists {
+			// Capture version before deletion for notification
+			nextVersion := entry.version + 1
+
+			c.removeEntry(entry) // Clean up LRU/internal pointers
+			delete(c.cache, key) // Remove from map
+
+			if c.config.EnableMetrics {
+				c.metrics.Deletes.Add(1)
+			}
+
+			c.notifyInvalidation(key, nextVersion)
+		}
+	}
+
 	return nil
 }
 
