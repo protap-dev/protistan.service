@@ -13,9 +13,8 @@ import (
 
 // Mock listener for testing invalidation events
 type mockListener struct {
-	mu       sync.Mutex
-	events   []invalidationEvent
-	expected int
+	mu     sync.Mutex
+	events []invalidationEvent
 }
 
 type invalidationEvent struct {

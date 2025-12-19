@@ -3,11 +3,12 @@ package internal
 import "encore.dev/beta/errs"
 
 var (
-	ErrUnauthenticated      = errs.B().Code(errs.Unauthenticated).Msg("not authenticated").Err()
-	ErrUnauthorizedAction   = errs.B().Code(errs.PermissionDenied).Msg("user must be an artisan to access this endpoint").Err()
-	ErrArtisanNotFound      = errs.B().Code(errs.NotFound).Msg("artisan profile not found").Err()
-	ErrDatabaseError        = errs.B().Code(errs.Internal).Msg("database error").Err()
-	ErrValidationFailed     = errs.B().Code(errs.InvalidArgument).Msg("validation failed").Err()
+	ErrUnauthenticated    = errs.B().Code(errs.Unauthenticated).Msg("not authenticated").Err()
+	ErrUnauthorizedAction = errs.B().Code(errs.PermissionDenied).Msg("user must be an artisan to access this endpoint").Err()
+	ErrArtisanNotFound    = errs.B().Code(errs.NotFound).Msg("artisan profile not found").Err()
+	ErrDatabaseError      = errs.B().Code(errs.Internal).Msg("database error").Err()
+	ErrCacheError         = errs.B().Code(errs.Internal).Msg("cache error").Err()
+	ErrValidationFailed   = errs.B().Code(errs.InvalidArgument).Msg("validation failed").Err()
 
 	// Specific validation errors for better error messages
 	ErrInvalidInput         = errs.B().Code(errs.InvalidArgument).Msg("invalid input").Err()
