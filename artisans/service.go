@@ -102,6 +102,11 @@ func (s *Service) GetServiceCategories(ctx context.Context) (*handlers.Categorie
 	return s.categoriesHandler.GetAllCategories(ctx)
 }
 
+//encore:api auth method=GET path=/v0/artisans/services
+func (s *Service) GetServices(ctx context.Context, req *handlers.GetServicesRequest) (*handlers.ServicesResponseEnhanced, error) {
+	return s.categoriesHandler.GetAllServices(ctx, req)
+}
+
 //encore:api public method=POST path=/v0/artisans/search
 func (s *Service) SearchArtisans(ctx context.Context, req *handlers.SearchArtisansRequest) (*handlers.SearchArtisansResponse, error) {
 	return s.searchHandler.Search(ctx, req)
