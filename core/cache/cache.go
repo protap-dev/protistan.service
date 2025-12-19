@@ -4,6 +4,7 @@ import (
 	"container/list"
 	"context"
 	"fmt"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -33,6 +34,9 @@ type CacheManager interface {
 
 	// Delete removes an item from cache
 	Delete(ctx context.Context, key string) error
+
+	// DeleteByPrefix removes all items with keys starting with the given prefix
+	DeleteByPrefix(ctx context.Context, prefix string) error
 
 	// Clear removes all items from cache
 	Clear(ctx context.Context) error
@@ -422,6 +426,47 @@ func (c *InMemoryCache) Delete(ctx context.Context, key string) error {
 		// Notify listeners of invalidation
 		c.notifyInvalidation(key, entry.version+1)
 	}
+	return nil
+}
+
+// DeleteByPrefix removes all items with keys starting with the given prefix
+func (c *InMemoryCache) DeleteByPrefix(ctx context.Context, prefix string) error {
+	select {
+	case <-ctx.Done():
+		return ctx.Err()
+	default:
+	}
+	var keysToDelete []string
+	c.mu.RLock()
+	for key := range c.cache {
+		if strings.HasPrefix(key, prefix) {
+			keysToDelete = append(keysToDelete, key)
+		}
+	}
+	c.mu.RUnlock()
+
+	if len(keysToDelete) == 0 {
+		return nil
+	}
+
+	c.mu.Lock()
+	defer c.mu.Unlock()
+
+	for _, key := range keysToDelete {
+		if entry, exists := c.cache[key]; exists {
+			nextVersion := entry.version + 1
+
+			c.removeEntry(entry)
+			delete(c.cache, key)
+
+			if c.config.EnableMetrics {
+				c.metrics.Deletes.Add(1)
+			}
+
+			c.notifyInvalidation(key, nextVersion)
+		}
+	}
+
 	return nil
 }
 
