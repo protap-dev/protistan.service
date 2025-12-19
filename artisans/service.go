@@ -50,7 +50,7 @@ func initService() (*Service, error) {
 	ratesHandler := handlers.NewRatesHandler(ratesService, authHelper, logger)
 
 	// Initialize categories handler
-	categoriesHandler := handlers.NewCategoriesHandler(ratesRepo, logger)
+	categoriesHandler := handlers.NewCategoriesHandler(ratesRepo, logger, coreSvc.Cache())
 
 	return &Service{
 		profileHandler:    profileHandler,
@@ -100,6 +100,11 @@ func (s *Service) UpdateRates(ctx context.Context, req *handlers.UpdateArtisanRa
 //encore:api public method=GET path=/v0/artisans/categories
 func (s *Service) GetServiceCategories(ctx context.Context) (*handlers.CategoriesResponse, error) {
 	return s.categoriesHandler.GetAllCategories(ctx)
+}
+
+//encore:api auth method=GET path=/v0/artisans/services
+func (s *Service) GetServices(ctx context.Context, req *handlers.GetServicesRequest) (*handlers.ServicesResponseEnhanced, error) {
+	return s.categoriesHandler.GetAllServices(ctx, req)
 }
 
 //encore:api public method=POST path=/v0/artisans/search
