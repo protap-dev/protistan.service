@@ -164,21 +164,27 @@ func (r *QuoteRepository) FindExpiredQuotes(ctx context.Context) ([]*domain.Quot
 
 // WithTransaction executes a function within a database transaction
 func (r *QuoteRepository) WithTransaction(ctx context.Context, fn func(txRepo domain.QuoteRepository) error) error {
-	// Check if we're already in a transaction
-	if tx := r.db.WithContext(ctx); tx.Statement.DB != nil {
-		// Already in transaction, use it directly
-		txRepo := &QuoteRepository{
-			db:     tx,
-			coreDB: r.coreDB}
-		return fn(txRepo)
-	}
+	// COORDINATED TRANSACTIONS: Since Outbox and Quote data live in different databases,
+	// we nest their transactions. This ensures that if the business logic or the quote
+	// commit fails, the outbox event is also rolled back.
+	return r.coreDB.WithContext(ctx).Transaction(func(coreTx *gorm.DB) error {
+		// Check if we're already in a transaction on the quote DB
+		if tx := r.db.WithContext(ctx); tx.Statement.DB != nil {
+			txRepo := &QuoteRepository{
+				db:     tx,
+				coreDB: coreTx,
+			}
+			return fn(txRepo)
+		}
 
-	// Start new transaction
-	return r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
-		txRepo := &QuoteRepository{
-			db:     tx,
-			coreDB: r.coreDB}
-		return fn(txRepo)
+		// Start new transaction on quote DB
+		return r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+			txRepo := &QuoteRepository{
+				db:     tx,
+				coreDB: coreTx,
+			}
+			return fn(txRepo)
+		})
 	})
 }
 

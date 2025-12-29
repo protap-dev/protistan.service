@@ -49,6 +49,7 @@ func NewBookingSubscriber(
 
 // Package-level singleton for dependency injection
 var subscriberInstance *BookingSubscriber
+var initTrigger func() // Callback to trigger service initialization
 
 // SetSubscriberDependencies sets the dependencies for the subscriber
 // This should be called during service initialization
@@ -66,6 +67,11 @@ func SetSubscriberDependencies(
 		publisher,
 		wsManager,
 	)
+}
+
+// SetInitTrigger sets the callback to trigger service initialization
+func SetInitTrigger(f func()) {
+	initTrigger = f
 }
 
 // Subscription for booking-assigned events (creates thread)
@@ -88,6 +94,11 @@ var _ = pubsub.NewSubscription(
 
 // HandleBookingStatusChange processes booking status changes and generates automated messages
 func HandleBookingStatusChange(ctx context.Context, envelope eventscommon.EventEnvelope[bookingdomain.BookingEvent]) error {
+	// Ensure service is initialized (lazy initialization for subscribers)
+	if subscriberInstance == nil && initTrigger != nil {
+		initTrigger()
+	}
+
 	if subscriberInstance == nil {
 		return fmt.Errorf("subscriber not initialized")
 	}
@@ -272,7 +283,8 @@ func (s *BookingSubscriber) createAutomatedMessage(
 	if fn := template.MetadataFunc; fn != nil {
 		if metadataMap := fn(event); len(metadataMap) > 0 {
 			if bytes, err := json.Marshal(metadataMap); err != nil {
-				log.Printf("Failed to marshal message metadata: %v", err)
+				log.Printf("WARN: Failed to marshal message metadata for booking %s: %v", event.BookingID, err)
+				// Log error but continue without metadata
 			} else {
 				metadataJSON = bytes
 			}
@@ -281,20 +293,23 @@ func (s *BookingSubscriber) createAutomatedMessage(
 
 	data := buildTemplateData(event)
 
-	// Generate message content
-	content := template.ContentFunc(data)
-
 	// Create automated message
 	now := time.Now()
+	idempotencyKey := fmt.Sprintf("auto-%s-%s", event.BookingID, event.Status)
+	// Check for quote_id in the enriched data map (potentially from RawData)
+	if quoteID, ok := data["quote_id"].(string); ok && quoteID != "" {
+		idempotencyKey = fmt.Sprintf("auto-%s-%s-%s", event.BookingID, event.Status, quoteID)
+	}
+
 	msg := &domain.Message{
 		ID:             uuid.NewString(),
 		ThreadID:       thread.ID,
 		SenderID:       SystemSenderID, // Special system sender
-		Content:        content,
+		Content:        template.ContentFunc(data),
 		MessageType:    template.MessageType,
 		Status:         domain.MessageSent,
 		SentAt:         &now,
-		IdempotencyKey: fmt.Sprintf("auto-%s-%s", event.BookingID, event.Status),
+		IdempotencyKey: idempotencyKey,
 		Metadata:       metadataJSON, // ✅ Now includes useful IDs
 		CreatedAt:      now,
 		UpdatedAt:      now,
@@ -327,13 +342,24 @@ func buildTemplateData(event *bookingdomain.BookingEvent) map[string]interface{}
 		"timestamp":  event.Timestamp,
 	}
 
-	// Add artisan info if available
-	if event.ArtisanID != nil {
-		data["artisan_id"] = *event.ArtisanID
+	// 1. If RawData is present, unmarshal it first (contains rich typed data)
+	if len(event.RawData) > 0 {
+		var rawMap map[string]interface{}
+		if err := json.Unmarshal(event.RawData, &rawMap); err == nil {
+			for k, v := range rawMap {
+				data[k] = v
+			}
+		}
 	}
 
+	// 2. Add/Override with Metadata fields
 	for k, v := range event.Metadata {
 		data[k] = v
+	}
+
+	// 3. Normalized computed fields
+	if event.ArtisanID != nil {
+		data["artisan_id"] = *event.ArtisanID
 	}
 
 	// Normalize artisan name
@@ -354,54 +380,71 @@ func buildTemplateData(event *bookingdomain.BookingEvent) map[string]interface{}
 	}
 	data["service_type"] = serviceType
 
-	// Parse amount if present
-	if amountStr, ok := event.Metadata["amount"]; ok {
-		if parsed, err := strconv.ParseFloat(amountStr, 64); err == nil {
-			data["amount"] = parsed
+	// Parse amount if present (check data map which includes RawData unmarshaled fields)
+	if _, ok := data["amount"]; !ok {
+		// Fallback to amount_cents if present (from RawData)
+		if cents, ok := data["amount_cents"]; ok {
+			switch v := cents.(type) {
+			case float64:
+				data["amount"] = v / 100.0
+			case int64:
+				data["amount"] = float64(v) / 100.0
+			case int:
+				data["amount"] = float64(v) / 100.0
+			case json.Number:
+				if f, err := v.Float64(); err == nil {
+					data["amount"] = f / 100.0
+				}
+			}
+		} else {
+			data["amount"] = float64(0)
+		}
+	} else {
+		// If amount exists as string (from Metadata), convert to float
+		if str, ok := data["amount"].(string); ok {
+			if parsed, err := strconv.ParseFloat(str, 64); err == nil {
+				data["amount"] = parsed
+			}
 		}
 	}
-	if _, ok := data["amount"]; !ok {
-		data["amount"] = float64(0)
-	}
 
-	// Add currency (default to NGN)
-	if currency, ok := event.Metadata["currency"]; ok {
-		data["currency"] = currency
-	} else {
+	// Add currency (default to NGN, check data map)
+	if _, ok := data["currency"]; !ok {
 		data["currency"] = "NGN"
 	}
 
 	// Add reason if present
-	if reason, ok := event.Metadata["reason"]; ok {
-		data["reason"] = reason
-	} else {
+	if event.Reason != nil {
+		data["reason"] = *event.Reason
+	} else if _, ok := data["reason"]; !ok {
 		data["reason"] = ""
 	}
 
 	// Parse ETA minutes if present
-	if etaStr, ok := event.Metadata["eta_minutes"]; ok {
-		if parsed, err := strconv.Atoi(etaStr); err == nil {
-			data["eta_minutes"] = parsed
-		}
-	}
 	if _, ok := data["eta_minutes"]; !ok {
 		data["eta_minutes"] = 0
+	} else {
+		if str, ok := data["eta_minutes"].(string); ok {
+			if parsed, err := strconv.Atoi(str); err == nil {
+				data["eta_minutes"] = parsed
+			}
+		}
 	}
 
 	// Parse scheduled time if provided
-	if scheduledAtStr, ok := event.Metadata["scheduled_at"]; ok {
-		if ts, err := time.Parse(time.RFC3339, scheduledAtStr); err == nil {
-			data["scheduled_at"] = ts
+	if val, ok := data["scheduled_at"]; ok {
+		if str, ok := val.(string); ok {
+			if ts, err := time.Parse(time.RFC3339, str); err == nil {
+				data["scheduled_at"] = ts
+			}
 		}
 	}
 
 	// Determine who cancelled
 	if event.Status == bookingdomain.BookingCancelled {
-		cancelledBy := "the customer"
-		if raw, ok := event.Metadata["cancelled_by"]; ok && strings.TrimSpace(raw) != "" {
-			cancelledBy = raw
+		if _, ok := data["cancelled_by"]; !ok {
+			data["cancelled_by"] = "the customer"
 		}
-		data["cancelled_by"] = cancelledBy
 	}
 
 	return data

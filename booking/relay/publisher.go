@@ -32,14 +32,18 @@ func (p *BookingPublisher) PublishToTopic(ctx context.Context, outboxEvent *repo
 	case "booking.status":
 		_, err := topics.BookingStatus.Publish(ctx, envelope)
 		return err
-	case "booking.cancelled":
-		_, err := events.CancelledTopic.Publish(ctx, envelope)
+	case "booking.created":
+		// Fallback to Status topic if no dedicated created topic exists
+		_, err := topics.BookingStatus.Publish(ctx, envelope)
 		return err
 	case "booking.offered":
 		_, err := events.OfferedTopic.Publish(ctx, envelope)
 		return err
 	case "booking.assigned":
 		_, err := topics.BookingAssigned.Publish(ctx, envelope)
+		return err
+	case "booking.cancelled":
+		_, err := events.CancelledTopic.Publish(ctx, envelope)
 		return err
 	default:
 		// Default to status topic for unknown topic names
