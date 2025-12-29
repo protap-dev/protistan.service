@@ -284,7 +284,10 @@ func (s *Service) OnQuoteProposed(ctx context.Context, quoteEvent *eventscommon.
 		return err
 	}
 
-	rawData, _ := json.Marshal(quoteEvent)
+	rawData, err := json.Marshal(quoteEvent)
+	if err != nil {
+		log.Printf("[ERROR] Failed to marshal quoteEvent for rawData on booking %s: %v", quoteEvent.BookingID, err)
+	}
 
 	err = s.bookingsHandler.UpdateBookingStatusInternal(
 		ctx,
