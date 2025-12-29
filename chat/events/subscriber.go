@@ -349,6 +349,8 @@ func buildTemplateData(event *bookingdomain.BookingEvent) map[string]interface{}
 			for k, v := range rawMap {
 				data[k] = v
 			}
+		} else {
+			log.Printf("WARN: Failed to unmarshal RawData for booking %s: %v", event.BookingID, err)
 		}
 	}
 
@@ -394,6 +396,9 @@ func buildTemplateData(event *bookingdomain.BookingEvent) map[string]interface{}
 			case json.Number:
 				if f, err := v.Float64(); err == nil {
 					data["amount"] = f / 100.0
+				} else {
+					log.Printf("WARN: Failed to parse amount_cents as float for booking %s: %v", event.BookingID, err)
+					data["amount"] = float64(0)
 				}
 			}
 		} else {
@@ -404,6 +409,9 @@ func buildTemplateData(event *bookingdomain.BookingEvent) map[string]interface{}
 		if str, ok := data["amount"].(string); ok {
 			if parsed, err := strconv.ParseFloat(str, 64); err == nil {
 				data["amount"] = parsed
+			} else {
+				log.Printf("WARN: Failed to parse amount string '%s' for booking %s: %v", str, event.BookingID, err)
+				data["amount"] = float64(0)
 			}
 		}
 	}
@@ -427,6 +435,9 @@ func buildTemplateData(event *bookingdomain.BookingEvent) map[string]interface{}
 		if str, ok := data["eta_minutes"].(string); ok {
 			if parsed, err := strconv.Atoi(str); err == nil {
 				data["eta_minutes"] = parsed
+			} else {
+				log.Printf("WARN: Failed to parse eta_minutes '%s' for booking %s: %v", str, event.BookingID, err)
+				data["eta_minutes"] = 0
 			}
 		}
 	}
@@ -436,6 +447,8 @@ func buildTemplateData(event *bookingdomain.BookingEvent) map[string]interface{}
 		if str, ok := val.(string); ok {
 			if ts, err := time.Parse(time.RFC3339, str); err == nil {
 				data["scheduled_at"] = ts
+			} else {
+				log.Printf("WARN: Failed to parse scheduled_at '%s' for booking %s: %v", str, event.BookingID, err)
 			}
 		}
 	}

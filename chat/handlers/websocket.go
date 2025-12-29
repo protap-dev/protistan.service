@@ -185,6 +185,7 @@ func (h *MessagesHandler) HandleWebSocketConnection(ctx context.Context, threadI
 			select {
 			case msgChan <- wsMsg:
 			case <-time.After(50 * time.Millisecond):
+				log.Printf("WARN: Dropped history message for thread %s due to full channel", threadID)
 			}
 		}
 	}

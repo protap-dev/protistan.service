@@ -118,6 +118,20 @@ func (r *Relay[EventType]) processBatch(ctx context.Context) error {
 	for _, outboxEvent := range events {
 		if err := r.processEvent(ctx, outboxEvent); err != nil {
 			r.metrics.RecordEventFailure()
+
+			// Check if permanently failed
+			if outboxEvent.Status == "failed" {
+				log.Printf("⚠️  DEAD LETTER: Event %s permanently failed after %d retries. Topic: %s",
+					outboxEvent.ID,
+					outboxEvent.RetryCount,
+					outboxEvent.Topic)
+			} else {
+				log.Printf("Scheduled retry for event %s (attempt %d/%d) at %v",
+					outboxEvent.ID,
+					outboxEvent.RetryCount+1,
+					r.config.MaxRetries,
+					outboxEvent.NextRetryAt)
+			}
 			failed++
 		} else {
 			processed++
