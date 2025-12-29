@@ -56,14 +56,13 @@ func (wm *WebSocketManager) UnregisterClient(client *WSClient) {
 		return
 	}
 
-	threadID := client.threadID
-	if threadClients, exists := wm.clients[threadID]; exists {
-		if _, ok := threadClients[client]; ok {
-			close(client.close)
-			delete(threadClients, client)
-		}
+	close(client.close)
+
+	if threadClients, exists := wm.clients[client.threadID]; exists {
+		delete(threadClients, client)
+
 		if len(threadClients) == 0 {
-			delete(wm.clients, threadID)
+			delete(wm.clients, client.threadID)
 		}
 	}
 }
@@ -109,7 +108,6 @@ func (wm *WebSocketManager) broadcastLoop() {
 			select {
 			case client.send <- msg:
 			case <-time.After(50 * time.Millisecond):
-				log.Printf("Failed to send message to client %s in thread %s: channel blocked", client.userID, msg.ThreadID)
 			}
 		}
 	}
@@ -123,8 +121,8 @@ func (h *MessagesHandler) HandleWebSocketConnection(ctx context.Context, threadI
 		conn.Close()
 		return
 	}
-	userID := userContext.ID
 
+	userID := userContext.ID
 	thread, err := h.threadRepo.GetByID(ctx, threadID)
 	if err != nil {
 		conn.WriteMessage(websocket.CloseMessage, []byte("Thread not found"))
@@ -142,10 +140,35 @@ func (h *MessagesHandler) HandleWebSocketConnection(ctx context.Context, threadI
 	client := GetWSManager().RegisterClient(threadID, userID, msgChan)
 	defer GetWSManager().UnregisterClient(client)
 
+	// 1) Start writer goroutine FIRST
+	writerDone := make(chan struct{})
+	go func() {
+		defer close(writerDone)
+		for {
+			select {
+			case <-client.close:
+				return
+			case msg := <-msgChan:
+				if err := conn.WriteJSON(msg); err != nil {
+					conn.Close()
+					return
+				}
+			}
+		}
+	}()
+
+	// 2) Replay history
 	recentMessages, err := h.messageRepo.GetByThreadID(ctx, threadID, 50, 0)
 	if err == nil {
 		for i := len(recentMessages) - 1; i >= 0; i-- {
 			msg := recentMessages[i]
+
+			// Determine correct message type
+			msgType := string(msg.MessageType)
+			if msg.SenderID == "00000000-0000-0000-0000-000000000000" {
+				msgType = "system"
+			}
+
 			wsMsg := &WSMessage{
 				ID:          msg.ID,
 				ThreadID:    msg.ThreadID,
@@ -153,51 +176,56 @@ func (h *MessagesHandler) HandleWebSocketConnection(ctx context.Context, threadI
 				Content:     msg.Content,
 				Status:      string(msg.Status),
 				SentAt:      *msg.SentAt,
-				MessageType: string(msg.MessageType),
+				MessageType: msgType,
+				Type:        "message", // ← Always "message" for replay
 			}
-
-			// Add metadata if it exists
 			if len(msg.Metadata) > 0 && string(msg.Metadata) != "null" {
 				wsMsg.Metadata = json.RawMessage(msg.Metadata)
 			}
-
-			client.send <- wsMsg
+			select {
+			case msgChan <- wsMsg:
+			case <-time.After(50 * time.Millisecond):
+				log.Printf("WARN: Dropped history message for thread %s due to full channel", threadID)
+			}
 		}
 	}
 
-	go func() {
-		for {
-			var msg WSMessage
-			if err := conn.ReadJSON(&msg); err != nil {
-				conn.Close()
-				return
-			}
-			msg.ThreadID = threadID
-			if strings.EqualFold(msg.Type, "ack") {
-				if err := h.handleStatusAck(ctx, threadID, &msg); err != nil {
-					h.logger.Warn(ctx, "websocket_ack_failed", map[string]interface{}{
-						"thread_id":  threadID,
-						"message_id": msg.ID,
-						"error":      err.Error(),
-					})
-				}
-				continue
-			}
-			msg.Type = "message"
-			msg.SenderID = userID
-			msg.SentAt = time.Now()
-			if msg.Status == "" {
-				msg.Status = string(domain.MessageSent)
-			}
-			GetWSManager().Broadcast(&msg)
-		}
-	}()
+	// Send replay completion marker
+	select {
+	case msgChan <- &WSMessage{
+		Type: "replay_complete",
+	}:
+	case <-time.After(50 * time.Millisecond):
+	}
 
-	for msg := range msgChan {
-		if err := conn.WriteJSON(msg); err != nil {
+	for {
+		var msg WSMessage
+		if err := conn.ReadJSON(&msg); err != nil {
 			conn.Close()
 			return
 		}
+
+		msg.ThreadID = threadID
+
+		if strings.EqualFold(msg.Type, "ack") {
+			if err := h.handleStatusAck(ctx, threadID, &msg); err != nil {
+				h.logger.Warn(ctx, "websocket_ack_failed", map[string]interface{}{
+					"thread_id":  threadID,
+					"message_id": msg.ID,
+					"error":      err.Error(),
+				})
+			}
+			continue
+		}
+
+		msg.Type = "message"
+		msg.SenderID = userID
+		msg.SentAt = time.Now()
+		if msg.Status == "" {
+			msg.Status = string(domain.MessageSent)
+		}
+
+		GetWSManager().Broadcast(&msg)
 	}
 }
 
@@ -216,16 +244,14 @@ func (h *MessagesHandler) handleStatusAck(ctx context.Context, threadID string, 
 		return err
 	}
 
-	if message.ThreadID != threadID {
+	// Validate thread ownership and transition state
+	switch {
+	case message.ThreadID != threadID:
 		return domain.ErrInvalidParticipant
-	}
-
-	if message.Status == targetStatus {
+	case message.Status == targetStatus:
 		h.broadcastStatusUpdate(message)
 		return nil
-	}
-
-	if !message.CanTransitionTo(targetStatus) {
+	case !message.CanTransitionTo(targetStatus):
 		return domain.ErrInvalidTransition
 	}
 
@@ -233,15 +259,11 @@ func (h *MessagesHandler) handleStatusAck(ctx context.Context, threadID string, 
 	message.Status = targetStatus
 	message.UpdatedAt = now
 
-	switch targetStatus {
-	case domain.MessageDelivered:
-		if message.DeliveredAt == nil {
-			message.DeliveredAt = &now
-		}
-	case domain.MessageRead:
-		if message.DeliveredAt == nil {
-			message.DeliveredAt = &now
-		}
+	// Advance timestamps based on progress
+	if (targetStatus == domain.MessageDelivered || targetStatus == domain.MessageRead) && message.DeliveredAt == nil {
+		message.DeliveredAt = &now
+	}
+	if targetStatus == domain.MessageRead {
 		message.ReadAt = &now
 	}
 

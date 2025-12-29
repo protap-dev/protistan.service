@@ -28,12 +28,27 @@ type Service struct {
 	relay           *relay.OutboxRelay
 }
 
+func init() {
+	// Provide the events package with a way to initialize this service
+	// to avoid circular dependencies while ensuring subscriber readiness.
+	events.SetInitTrigger(func() {
+		initService()
+	})
+}
+
 var ChatDB = sqldb.NewDatabase("chat", sqldb.DatabaseConfig{
 	Migrations: "./migrations",
 })
 
 var serviceInstance *Service
 var serviceOnce sync.Once
+
+// EnsureInitialized ensures that the service and its dependencies are initialized.
+// This is useful for event subscribers that run independently of API requests.
+func EnsureInitialized() error {
+	_, err := initService()
+	return err
+}
 
 func initService() (*Service, error) {
 	var initErr error

@@ -101,48 +101,6 @@ func (s *SearchService) Search(ctx context.Context, input *SearchInput) (*Search
 	return result, nil
 }
 
-// validateSearchInput validates search parameters
-func (s *SearchService) validateSearchInput(input *SearchInput) error {
-	// At least one search criteria must be provided
-	if input.Query == nil && input.CategoryIDs == nil && input.Location == nil {
-		return internal.ErrValidationFailed
-	}
-
-	// Validate query if provided
-	if input.Query != nil && len(strings.TrimSpace(*input.Query)) < 2 {
-		return internal.ErrValidationFailed
-	}
-
-	// Validate category IDs if provided
-	if input.CategoryIDs != nil {
-		for _, categoryID := range *input.CategoryIDs {
-			if categoryID == "" {
-				return internal.ErrValidationFailed
-			}
-			if len(categoryID) != 36 {
-				return internal.ErrValidationFailed
-			}
-		}
-	}
-
-	// Validate rating range if provided
-	if input.MinRating != nil {
-		if *input.MinRating < 0 || *input.MinRating > 5 {
-			return internal.ErrValidationFailed
-		}
-	}
-
-	// Validate pagination parameters
-	if input.Limit != nil && (*input.Limit < 1 || *input.Limit > 100) {
-		return internal.ErrValidationFailed
-	}
-	if input.Offset != nil && *input.Offset < 0 {
-		return internal.ErrValidationFailed
-	}
-
-	return nil
-}
-
 // executeSearchQuery builds and executes the search query with all filters
 func (s *SearchService) executeSearchQuery(ctx context.Context, input *SearchInput) ([]SearchResult, int, error) {
 	// Get database connection from repository

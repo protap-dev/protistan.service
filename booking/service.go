@@ -2,6 +2,7 @@ package booking
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"log"
 	"sync"
@@ -283,6 +284,12 @@ func (s *Service) OnQuoteProposed(ctx context.Context, quoteEvent *eventscommon.
 		return err
 	}
 
+	rawData, err := json.Marshal(quoteEvent)
+	if err != nil {
+		log.Printf("[ERROR] Failed to marshal quoteEvent for rawData on booking %s: %v", quoteEvent.BookingID, err)
+		return fmt.Errorf("failed to marshal quote event: %w", err)
+	}
+
 	err = s.bookingsHandler.UpdateBookingStatusInternal(
 		ctx,
 		quoteEvent.BookingID,
@@ -290,6 +297,8 @@ func (s *Service) OnQuoteProposed(ctx context.Context, quoteEvent *eventscommon.
 		quoteEvent.UserID,
 		nil,
 		current,
+		nil, // No manual metadata needed, details are in RawData
+		rawData,
 	)
 
 	if err != nil {
@@ -297,6 +306,7 @@ func (s *Service) OnQuoteProposed(ctx context.Context, quoteEvent *eventscommon.
 			quoteEvent.BookingID, err)
 		return err
 	}
+
 	return nil
 }
 
@@ -312,6 +322,8 @@ func (s *Service) OnQuoteAccepted(ctx context.Context, quoteEvent *eventscommon.
 		quoteEvent.UserID,
 		nil,
 		current,
+		nil,
+		nil,
 	)
 }
 
@@ -336,6 +348,8 @@ func (s *Service) OnQuoteRejected(ctx context.Context, quoteEvent *eventscommon.
 		quoteEvent.UserID,
 		reason,
 		current,
+		nil,
+		nil,
 	)
 }
 
@@ -344,7 +358,7 @@ func (s *Service) OnPaymentConfirmed(ctx context.Context, event *domain.BookingE
 	if err != nil {
 		return err
 	}
-	return s.bookingsHandler.UpdateBookingStatusInternal(ctx, event.BookingID, domain.BookingConfirmed, event.UserID, nil, current)
+	return s.bookingsHandler.UpdateBookingStatusInternal(ctx, event.BookingID, domain.BookingConfirmed, event.UserID, nil, current, nil, nil)
 }
 
 func (s *Service) OnPaymentFailed(ctx context.Context, event *domain.BookingEvent) error {
@@ -366,7 +380,7 @@ func (s *Service) OnPaymentFailed(ctx context.Context, event *domain.BookingEven
 	}
 
 	// Transition back to quote accepted state
-	return s.bookingsHandler.UpdateBookingStatusInternal(ctx, event.BookingID, domain.BookingQuoteAccepted, event.UserID, event.Reason, current)
+	return s.bookingsHandler.UpdateBookingStatusInternal(ctx, event.BookingID, domain.BookingQuoteAccepted, event.UserID, event.Reason, current, nil, nil)
 }
 
 // ExpireOffers is a cron job that expires pending offers

@@ -22,7 +22,7 @@ type CategoriesResponse struct {
 // GetServicesRequest represents the request for getting services with optional filters
 type GetServicesRequest struct {
 	CategoryID   []string `json:"category_id,omitempty" query:"category_id"` // Support multiple category IDs
-	IncludeEmpty *bool    `json:"include_empty" query:"include_empty"`       // Include categories with no services (default: true)
+	ExcludeEmpty bool     `json:"exclude_empty" query:"exclude_empty"`       // Exclude categories with no services (default: false)
 }
 
 // ServicesResponseEnhanced represents an enhanced response with metadata
@@ -88,8 +88,8 @@ func (h *CategoriesHandler) GetAllServices(ctx context.Context, req *GetServices
 
 	if req != nil {
 		categoryIDs = req.CategoryID
-		if req.IncludeEmpty != nil {
-			includeEmpty = *req.IncludeEmpty
+		if req.ExcludeEmpty {
+			includeEmpty = false
 		}
 	}
 

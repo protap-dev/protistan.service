@@ -71,7 +71,6 @@ func (r *Relay[EventType]) Stop() {
 
 	close(r.stopCh)
 	r.wg.Wait()
-	log.Println("Outbox relay stopped")
 }
 
 // relayLoop is the main processing loop
@@ -80,8 +79,6 @@ func (r *Relay[EventType]) relayLoop(ctx context.Context) {
 
 	ticker := time.NewTicker(r.config.PollingInterval)
 	defer ticker.Stop()
-
-	log.Printf("Relay polling every %v", r.config.PollingInterval)
 
 	for {
 		select {
@@ -124,12 +121,10 @@ func (r *Relay[EventType]) processBatch(ctx context.Context) error {
 
 			// Check if permanently failed
 			if outboxEvent.Status == "failed" {
-				log.Printf("⚠️  DEAD LETTER: Event %s permanently failed after %d retries. Topic: %s, Error: %s",
+				log.Printf("⚠️  DEAD LETTER: Event %s permanently failed after %d retries. Topic: %s",
 					outboxEvent.ID,
 					outboxEvent.RetryCount,
-					outboxEvent.Topic,
-					*outboxEvent.LastError)
-				// TODO: Send alert/notification for manual intervention
+					outboxEvent.Topic)
 			} else {
 				log.Printf("Scheduled retry for event %s (attempt %d/%d) at %v",
 					outboxEvent.ID,
@@ -174,7 +169,6 @@ func (r *Relay[EventType]) processEvent(ctx context.Context, outboxEvent *reposi
 
 	var event EventType
 	if err := json.Unmarshal(outboxEvent.Data, &event); err != nil {
-		// Permanent error - no point retrying
 		return r.markEventFailed(ctx, outboxEvent, fmt.Sprintf("unmarshal error: %v", err))
 	}
 
@@ -186,7 +180,10 @@ func (r *Relay[EventType]) processEvent(ctx context.Context, outboxEvent *reposi
 
 	// Success - mark as processed
 	now := time.Now()
-	return r.processor.MarkEventProcessed(ctx, r.db, outboxEvent.ID, &now)
+	if err := r.processor.MarkEventProcessed(ctx, r.db, outboxEvent.ID, &now); err != nil {
+		return err
+	}
+	return nil
 }
 
 func (r *Relay[EventType]) scheduleRetry(ctx context.Context, event *repository.OutboxEvent, err error) error {

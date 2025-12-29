@@ -289,7 +289,7 @@ func (h *BookingsHandler) UpdateBookingStatus(ctx context.Context, id string, re
 	}
 
 	// Use the internal helper for the actual status update
-	err = h.UpdateBookingStatusInternal(ctx, id, newStatus, userCtx.ID, req.Reason, current)
+	err = h.UpdateBookingStatusInternal(ctx, id, newStatus, userCtx.ID, req.Reason, current, nil, nil)
 	if err != nil {
 		return nil, err
 	}
@@ -460,7 +460,7 @@ func (h *BookingsHandler) CancelBooking(ctx context.Context, id string, req *Can
 	}
 
 	// Use the internal helper for the actual status update
-	err = h.UpdateBookingStatusInternal(ctx, id, domain.BookingCancelled, userCtx.ID, req.Reason, current)
+	err = h.UpdateBookingStatusInternal(ctx, id, domain.BookingCancelled, userCtx.ID, req.Reason, current, nil, nil)
 	if err != nil {
 		return nil, err
 	}
@@ -529,7 +529,7 @@ func (h *BookingsHandler) RematchBooking(ctx context.Context, id string, req *Re
 }
 
 // UpdateBookingStatusInternal is a helper method that centralizes common status update logic
-func (h *BookingsHandler) UpdateBookingStatusInternal(ctx context.Context, bookingID string, newStatus domain.BookingStatus, userID string, reason *string, current *domain.Booking) error {
+func (h *BookingsHandler) UpdateBookingStatusInternal(ctx context.Context, bookingID string, newStatus domain.BookingStatus, userID string, reason *string, current *domain.Booking, metadata map[string]string, rawData []byte) error {
 	var previousStatus domain.BookingStatus
 
 	err := h.repo.WithTransaction(ctx, func(txRepo domain.BookingRepository) error {
@@ -545,7 +545,7 @@ func (h *BookingsHandler) UpdateBookingStatusInternal(ctx context.Context, booki
 			return binternal.ErrDatabaseError
 		}
 
-		// The outbox relay will publish this to the appropriate topic based on status
+		// Write event to outbox - ONE event per status change
 		statusEvent := &domain.BookingEvent{
 			BookingID:      bookingID,
 			Status:         newStatus,
@@ -554,12 +554,33 @@ func (h *BookingsHandler) UpdateBookingStatusInternal(ctx context.Context, booki
 			UserID:         userID,
 			ArtisanID:      current.ArtisanID,
 			Reason:         reason,
+			Metadata:       make(map[string]string),
+			RawData:        rawData,
 		}
 
-		// Write event to outbox - ONE event per status change
+		// Merge existing booking metadata and provided metadata
+		if current.Metadata != nil {
+			for k, v := range current.Metadata {
+				statusEvent.Metadata[k] = v
+			}
+		}
+		for k, v := range metadata {
+			statusEvent.Metadata[k] = v
+		}
+
 		if err := txRepo.CreateEventInOutbox(ctx, statusEvent); err != nil {
+			h.logger.Error(ctx, "failed to create status change event in outbox", err, map[string]interface{}{
+				"booking_id": bookingID,
+				"status":     newStatus,
+			})
 			return err
 		}
+
+		h.logger.Info(ctx, "booking status change event written to outbox", map[string]interface{}{
+			"booking_id": bookingID,
+			"status":     newStatus,
+			"has_raw":    len(rawData) > 0,
+		})
 
 		return nil
 	})
