@@ -103,16 +103,20 @@ func (s *QuoteService) ProposeQuote(ctx context.Context, input *ProposeQuoteInpu
 
 		// Create event
 		event := &QuoteEvent{
-			QuoteID:       quote.ID,
-			BookingID:     quote.BookingID,
-			Version:       quote.Version,
-			State:         string(QuoteProposed),
-			PreviousState: "",
-			AmountCents:   quote.AmountCents,
-			Currency:      quote.Currency,
-			ProposedBy:    quote.ProposedBy,
-			Timestamp:     now,
-			UserID:        input.ProposedBy,
+			QuoteID:               quote.ID,
+			BookingID:             quote.BookingID,
+			Version:               quote.Version,
+			State:                 string(QuoteProposed),
+			PreviousState:         "",
+			AmountCents:           quote.AmountCents,
+			Currency:              quote.Currency,
+			Breakdown:             quote.Breakdown,
+			EstimatedDurationMins: quote.EstimatedDurationMins,
+			Notes:                 quote.Notes,
+			ValidUntil:            quote.ValidUntil,
+			ProposedBy:            quote.ProposedBy,
+			Timestamp:             now,
+			UserID:                input.ProposedBy,
 		}
 
 		return txRepo.CreateEventInOutbox(ctx, event)

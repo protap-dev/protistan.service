@@ -10,7 +10,6 @@ import (
 	bookingdomain "encore.app/booking/domain"
 )
 
-// buildStandardMetadata creates a base metadata map with common fields
 func buildStandardMetadata(event *bookingdomain.BookingEvent) map[string]interface{} {
 	metadata := map[string]interface{}{
 		"booking_id": event.BookingID,
@@ -21,10 +20,10 @@ func buildStandardMetadata(event *bookingdomain.BookingEvent) map[string]interfa
 		metadata["artisan_id"] = *event.ArtisanID
 	}
 
-	// Add customer_id if available in event metadata
+	// Add all other metadata from event
 	if event.Metadata != nil {
-		if customerID, ok := event.Metadata["customer_id"]; ok && customerID != "" {
-			metadata["customer_id"] = customerID
+		for k, v := range event.Metadata {
+			metadata[k] = v
 		}
 	}
 
@@ -61,6 +60,7 @@ var AutomatedMessages = map[string]AutomatedMessageTemplate{
 			return fmt.Sprintf("A quote for %s %.2f has been submitted. Review the details to proceed.",
 				currency, amount)
 		},
+		MetadataFunc: buildStandardMetadata,
 	},
 
 	// 3. Quote Accepted

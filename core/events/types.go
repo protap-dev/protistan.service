@@ -18,18 +18,22 @@ type EventEnvelope[T any] struct {
 }
 
 type QuoteEvent struct {
-	QuoteID             string    `json:"quote_id"`
-	BookingID           string    `json:"booking_id"`
-	Version             int       `json:"version"`
-	State               string    `json:"state"`
-	PreviousState       string    `json:"previous_state"`
-	AmountCents         int64     `json:"amount_cents"`
-	Currency            string    `json:"currency"`
-	ProposedBy          string    `json:"proposed_by"`
-	DecisionBy          *string   `json:"decision_by,omitempty"`
-	Timestamp           time.Time `json:"timestamp"`
-	UserID              string    `json:"user_id"`
-	RejectionReasonCode *string   `json:"rejection_reason_code,omitempty"`
+	QuoteID               string     `json:"quote_id"`
+	BookingID             string     `json:"booking_id"`
+	Version               int        `json:"version"`
+	State                 string     `json:"state"`
+	PreviousState         string     `json:"previous_state"`
+	AmountCents           int64      `json:"amount_cents"`
+	Currency              string     `json:"currency"`
+	Breakdown             []byte     `json:"breakdown,omitempty"`
+	EstimatedDurationMins int        `json:"estimated_duration_mins,omitempty"`
+	Notes                 string     `json:"notes,omitempty"`
+	ValidUntil            *time.Time `json:"valid_until,omitempty"`
+	ProposedBy            string     `json:"proposed_by"`
+	DecisionBy            *string    `json:"decision_by,omitempty"`
+	Timestamp             time.Time  `json:"timestamp"`
+	UserID                string     `json:"user_id"`
+	RejectionReasonCode   *string    `json:"rejection_reason_code,omitempty"`
 }
 
 // Helper to generate IDs
