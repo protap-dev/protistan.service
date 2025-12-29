@@ -247,7 +247,7 @@ func (h *BookingsHandler) AcceptOffer(ctx context.Context, offerID string, req *
 			},
 		}
 
-		if err := h.repo.CreateEventInOutbox(ctx, assignedEvent); err != nil {
+		if err := txRepo.CreateEventInOutbox(ctx, assignedEvent); err != nil {
 			h.logger.Error(ctx, "failed to publish booking assigned event", err, map[string]interface{}{
 				"booking_id": booking.ID,
 			})
