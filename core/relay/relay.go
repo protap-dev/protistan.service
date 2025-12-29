@@ -145,7 +145,6 @@ func (r *Relay[EventType]) processBatch(ctx context.Context) error {
 
 	duration := time.Since(start)
 	r.metrics.RecordProcessingTime(duration)
-	log.Printf("Processed %d/%d events in %v (failed: %d)", processed, len(events), duration, failed)
 
 	return nil
 }
