@@ -1,6 +1,7 @@
 package domain
 
 import (
+	"encoding/base64"
 	"encoding/json"
 	"fmt"
 	"strconv"
@@ -15,15 +16,63 @@ func buildStandardMetadata(event *bookingdomain.BookingEvent) map[string]interfa
 		"booking_id": event.BookingID,
 	}
 
-	// Add artisan_id if available
+	// 1. If RawData is present, unmarshal it first (contains rich typed data)
+	if len(event.RawData) > 0 {
+		var rawMap map[string]interface{}
+		if err := json.Unmarshal(event.RawData, &rawMap); err == nil {
+			for k, v := range rawMap {
+				metadata[k] = v
+			}
+		}
+	}
+
+	// 2. Add artisan_id if available
 	if event.ArtisanID != nil && *event.ArtisanID != "" {
 		metadata["artisan_id"] = *event.ArtisanID
 	}
 
-	// Add all other metadata from event
+	// 3. Add/Override with normalized Metadata from event
 	if event.Metadata != nil {
 		for k, v := range event.Metadata {
 			metadata[k] = v
+		}
+	}
+
+	return metadata
+}
+
+// buildQuoteProposedMetadata builds metadata specifically for quote proposal events
+// It extends the standard metadata with proper breakdown handling
+func buildQuoteProposedMetadata(event *bookingdomain.BookingEvent) map[string]interface{} {
+	// Start with standard metadata
+	metadata := buildStandardMetadata(event)
+
+	// Special handling for breakdown field (stored as []byte in Quote, becomes base64 string)
+	// Unmarshal it into a proper JSON array structure
+	if breakdownRaw, ok := metadata["breakdown"]; ok {
+		switch v := breakdownRaw.(type) {
+		case string:
+			// If it's a base64 string, try to decode it first
+			var breakdownArray []interface{}
+
+			// Try to decode as base64 first
+			if decoded, err := base64.StdEncoding.DecodeString(v); err == nil {
+				if err := json.Unmarshal(decoded, &breakdownArray); err == nil {
+					metadata["breakdown"] = breakdownArray
+					break
+				}
+			}
+
+			// If not base64 or decoding failed, try unmarshalling directly
+			if err := json.Unmarshal([]byte(v), &breakdownArray); err == nil {
+				metadata["breakdown"] = breakdownArray
+			}
+		case []byte:
+			// If it's raw bytes, unmarshal directly
+			var breakdownArray []interface{}
+			if err := json.Unmarshal(v, &breakdownArray); err == nil {
+				metadata["breakdown"] = breakdownArray
+			}
 		}
 	}
 
@@ -60,7 +109,7 @@ var AutomatedMessages = map[string]AutomatedMessageTemplate{
 			return fmt.Sprintf("A quote for %s %.2f has been submitted. Review the details to proceed.",
 				currency, amount)
 		},
-		MetadataFunc: buildStandardMetadata,
+		MetadataFunc: buildQuoteProposedMetadata, // Use quote-specific metadata builder
 	},
 
 	// 3. Quote Accepted
