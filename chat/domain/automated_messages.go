@@ -1,6 +1,7 @@
 package domain
 
 import (
+	"encoding/base64"
 	"encoding/json"
 	"fmt"
 	"strconv"
@@ -10,24 +11,83 @@ import (
 	bookingdomain "encore.app/booking/domain"
 )
 
-func buildStandardMetadata(event *bookingdomain.BookingEvent) map[string]interface{} {
+func buildStandardMetadata(event *bookingdomain.BookingEvent) (map[string]interface{}, error) {
 	metadata := map[string]interface{}{
 		"booking_id": event.BookingID,
 	}
 
-	// Add artisan_id if available
+	// 1. If RawData is present, unmarshal it first (contains rich typed data)
+	if len(event.RawData) > 0 {
+		var rawMap map[string]interface{}
+		if err := json.Unmarshal(event.RawData, &rawMap); err != nil {
+			return nil, fmt.Errorf("failed to unmarshal RawData: %w", err)
+		}
+		for k, v := range rawMap {
+			metadata[k] = v
+		}
+	}
+
+	// 2. Add artisan_id if available
 	if event.ArtisanID != nil && *event.ArtisanID != "" {
 		metadata["artisan_id"] = *event.ArtisanID
 	}
 
-	// Add all other metadata from event
+	// 3. Add/Override with normalized Metadata from event
 	if event.Metadata != nil {
 		for k, v := range event.Metadata {
 			metadata[k] = v
 		}
 	}
 
-	return metadata
+	return metadata, nil
+}
+
+// buildQuoteProposedMetadata builds metadata specifically for quote proposal events
+// It extends the standard metadata with proper breakdown handling
+func buildQuoteProposedMetadata(event *bookingdomain.BookingEvent) (map[string]interface{}, error) {
+	// Start with standard metadata
+	metadata, err := buildStandardMetadata(event)
+	if err != nil {
+		return nil, err
+	}
+
+	// Special handling for breakdown field (stored as []byte in Quote, becomes base64 string)
+	// Unmarshal it into a proper JSON array structure
+	if breakdownRaw, ok := metadata["breakdown"]; ok {
+		breakdown, err := unmarshalBreakdown(breakdownRaw)
+		if err != nil {
+			return nil, err
+		}
+		metadata["breakdown"] = breakdown
+	}
+
+	return metadata, nil
+}
+
+// unmarshalBreakdown attempts to parse the breakdown field from various formats
+func unmarshalBreakdown(raw any) ([]any, error) {
+	var data []byte
+
+	switch v := raw.(type) {
+	case string:
+		// Attempt base64 decoding if it might be encoded []byte
+		if decoded, err := base64.StdEncoding.DecodeString(v); err == nil {
+			data = decoded
+		} else {
+			data = []byte(v)
+		}
+	case []byte:
+		data = v
+	default:
+		return nil, fmt.Errorf("unexpected type for breakdown: %T", raw)
+	}
+
+	var breakdown []any
+	if err := json.Unmarshal(data, &breakdown); err != nil {
+		return nil, fmt.Errorf("failed to parse breakdown data: %w", err)
+	}
+
+	return breakdown, nil
 }
 
 // AutomatedMessageTemplate defines templates for system messages
@@ -35,7 +95,7 @@ type AutomatedMessageTemplate struct {
 	EventType    string
 	MessageType  MessageType
 	ContentFunc  func(data map[string]interface{}) string
-	MetadataFunc func(event *bookingdomain.BookingEvent) map[string]interface{}
+	MetadataFunc func(event *bookingdomain.BookingEvent) (map[string]interface{}, error)
 }
 
 // AutomatedMessages registry - system messages for the chat room
@@ -60,7 +120,7 @@ var AutomatedMessages = map[string]AutomatedMessageTemplate{
 			return fmt.Sprintf("A quote for %s %.2f has been submitted. Review the details to proceed.",
 				currency, amount)
 		},
-		MetadataFunc: buildStandardMetadata,
+		MetadataFunc: buildQuoteProposedMetadata, // Use quote-specific metadata builder
 	},
 
 	// 3. Quote Accepted

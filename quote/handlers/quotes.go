@@ -311,3 +311,17 @@ func (h *QuotesHandler) clearBookingQuotesCache(ctx context.Context, bookingID s
 	cacheKey := fmt.Sprintf("quotes:booking:%s", bookingID)
 	h.cache.Delete(ctx, cacheKey)
 }
+
+// handleExpiredQuoteSync triggers immediate expiration when an expired quote is interacted with
+func (h *QuotesHandler) handleExpiredQuoteSync(ctx context.Context, quoteID string, action string) {
+	h.logger.Info(ctx, "triggering immediate expiration for expired quote during attempt", map[string]any{
+		"quote_id": quoteID,
+		"action":   action,
+	})
+
+	if err := h.quoteSvc.ExpireQuote(ctx, quoteID); err != nil {
+		h.logger.Error(ctx, fmt.Sprintf("failed to trigger immediate expiration for quote on %s", action), err, map[string]any{
+			"quote_id": quoteID,
+		})
+	}
+}
