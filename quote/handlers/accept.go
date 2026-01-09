@@ -2,8 +2,10 @@ package handlers
 
 import (
 	"context"
+	"errors"
 
 	"encore.app/booking"
+	quotedomain "encore.app/quote/domain"
 	qinternal "encore.app/quote/internal"
 	"encore.dev/beta/errs"
 )
@@ -67,6 +69,11 @@ func (h *QuotesHandler) AcceptQuote(ctx context.Context, id string, req *AcceptQ
 	// 6. Call domain service to accept the quote
 	updatedQuote, err := h.quoteSvc.AcceptQuote(ctx, id, userCtx.ID)
 	if err != nil {
+		// If quote is expired but state hasn't updated yet, expire it now
+		if errors.Is(err, quotedomain.ErrQuoteExpired) {
+			h.handleExpiredQuoteSync(ctx, id, "accept")
+		}
+
 		// Domain service handles validation, so we can just bubble up the error
 		h.logger.Error(ctx, "failed to accept quote", err, map[string]any{
 			"quote_id": id,

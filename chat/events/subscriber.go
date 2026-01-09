@@ -281,10 +281,15 @@ func (s *BookingSubscriber) createAutomatedMessage(
 	// Build message metadata
 	metadataJSON := datatypes.JSON(nil)
 	if fn := template.MetadataFunc; fn != nil {
-		if metadataMap := fn(event); len(metadataMap) > 0 {
-			if bytes, err := json.Marshal(metadataMap); err != nil {
+		metadataMap, err := fn(event)
+		if err != nil {
+			// Special Case: We want automated messages even if Metadata building fails.
+			// Log the error for visibility but continue so the message is actually sent.
+			log.Printf("ERROR: Failed to build message metadata for booking %s: %v", event.BookingID, err)
+		} else if len(metadataMap) > 0 {
+			bytes, err := json.Marshal(metadataMap)
+			if err != nil {
 				log.Printf("WARN: Failed to marshal message metadata for booking %s: %v", event.BookingID, err)
-				// Log error but continue without metadata
 			} else {
 				metadataJSON = bytes
 			}
