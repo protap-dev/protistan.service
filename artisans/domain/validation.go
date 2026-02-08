@@ -13,21 +13,9 @@ func NewValidator() *Validator {
 
 func (v *Validator) ValidateCreateProfile(input *CreateProfileInput) error {
 	var errors []string
-
 	// Category validation
-	if len(input.CategoryIDs) == 0 {
-		errors = append(errors, "at least one service category is required")
-	}
-	if len(input.CategoryIDs) > 10 {
-		errors = append(errors, "maximum 10 service categories allowed")
-	}
-
-	// Validate individual category IDs are not empty
-	for _, categoryID := range input.CategoryIDs {
-		if strings.TrimSpace(categoryID) == "" {
-			errors = append(errors, "category IDs cannot be empty")
-			break
-		}
+	if err := v.validateCategoryIDs(input.CategoryIDs); err != nil {
+		errors = append(errors, err.Error())
 	}
 
 	// Bio validation
@@ -79,19 +67,8 @@ func (v *Validator) ValidateUpdateProfile(input *UpdateProfileInput) error {
 	}
 
 	if input.CategoryIDs != nil {
-		if len(*input.CategoryIDs) == 0 {
-			errors = append(errors, "at least one service category is required")
-		}
-		if len(*input.CategoryIDs) > 10 {
-			errors = append(errors, "maximum 10 service categories allowed")
-		}
-
-		// Validate individual category IDs are not empty
-		for _, categoryID := range *input.CategoryIDs {
-			if strings.TrimSpace(categoryID) == "" {
-				errors = append(errors, "category IDs cannot be empty")
-				break
-			}
+		if err := v.validateCategoryIDs(*input.CategoryIDs); err != nil {
+			errors = append(errors, err.Error())
 		}
 	}
 
@@ -127,6 +104,22 @@ func (v *Validator) ValidateUpdateProfile(input *UpdateProfileInput) error {
 }
 
 // Private validation helpers
+func (v *Validator) validateCategoryIDs(categoryIDs []string) error {
+	// Categories are optional, but if provided:
+	// - Maximum 10 categories allowed
+	// - Individual category IDs cannot be empty strings
+	if len(categoryIDs) > 10 {
+		return fmt.Errorf("maximum 10 service categories allowed")
+	}
+
+	for _, categoryID := range categoryIDs {
+		if strings.TrimSpace(categoryID) == "" {
+			return fmt.Errorf("category ID cannot be an empty string")
+		}
+	}
+	return nil
+}
+
 func (v *Validator) validateBio(bio string) error {
 	if bio == "" {
 		return fmt.Errorf("bio is required")
