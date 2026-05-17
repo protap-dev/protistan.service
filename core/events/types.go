@@ -36,6 +36,25 @@ type QuoteEvent struct {
 	RejectionReasonCode   *string    `json:"rejection_reason_code,omitempty"`
 }
 
+type PaymentEvent struct {
+	TransactionID  string            `json:"transaction_id"`
+	BookingID      string            `json:"booking_id"`
+	QuoteID        string            `json:"quote_id"`
+	CustomerID     string            `json:"customer_id"`
+	ReservationKey string            `json:"reservation_key"`
+	Status         string            `json:"status"`
+	PreviousStatus string            `json:"previous_status"`
+	Provider       string            `json:"provider"`
+	AmountCents    int64             `json:"amount_cents"`
+	Amount         float64           `json:"amount"`
+	Currency       string            `json:"currency"`
+	InternalRef    string            `json:"internal_ref"`
+	ProviderRef    string            `json:"provider_ref,omitempty"`
+	Reason         *string           `json:"reason,omitempty"`
+	Timestamp      time.Time         `json:"timestamp"`
+	Metadata       map[string]string `json:"metadata,omitempty"`
+}
+
 // Helper to generate IDs
 func GenerateEventID() string {
 	return time.Now().Format("20060102150405") + "-" + randomString(8)

@@ -245,22 +245,7 @@ func TestEventEnvelopePublishingThroughOutbox(t *testing.T) {
 	}), &gorm.Config{})
 	require.NoError(t, err)
 
-	// Create outbox table manually in test DB (mimicking core DB schema)
-	// We need this because the code writes to 'outbox' table which is expected to exist
-	tx := gormDB.Exec(`
-		CREATE TABLE IF NOT EXISTS outbox (
-			id UUID PRIMARY KEY DEFAULT generate_uuid(),
-			topic TEXT NOT NULL,
-			data JSONB NOT NULL,
-			inserted_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-			processed_at TIMESTAMPTZ,
-			retry_count INTEGER DEFAULT 0,
-			next_retry_at TIMESTAMPTZ,
-			last_error TEXT,
-			status TEXT DEFAULT 'pending'
-		);
-	`)
-	require.NoError(t, tx.Error)
+	ensureOutboxTable(t, gormDB)
 
 	// Initialize repository with the test DB acting as BOTH booking DB and core DB
 	repo := repository.NewBookingRepository(gormDB, gormDB)
