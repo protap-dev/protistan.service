@@ -2,164 +2,173 @@ package payment
 
 import (
 	"context"
-	"fmt"
+	"net/http"
+	"sync"
 	"time"
 
-	eventscommon "encore.app/core/events"
-	topics_payment "encore.app/core/events/topics/payment"
+	"encore.app/core/cache"
+	coredb "encore.app/core/db"
+	corerelay "encore.app/core/relay"
+	pdomain "encore.app/payment/domain"
+	phandlers "encore.app/payment/handlers"
+	pproviders "encore.app/payment/providers"
+	prelay "encore.app/payment/relay"
+	prepos "encore.app/payment/repository"
+	"encore.dev/cron"
+	"encore.dev/storage/sqldb"
+	"gorm.io/driver/postgres"
+	"gorm.io/gorm"
 )
 
+const webhookEventRetention = 90 * 24 * time.Hour
+
+var PaymentDB = sqldb.NewDatabase("payment", sqldb.DatabaseConfig{
+	Migrations: "./migrations",
+})
+
+// secrets is populated by the Encore framework at runtime.
+var secrets struct {
+	NombaClientID     string
+	NombaClientSecret string
+	NombaSignatureKey string
+	NombaAccountID    string
+	NombaApi          string
+	PublicBaseURL     string
+	AppReturnURL      string
+	ReturnContextKey  string
+}
+
 //encore:service
-type Service struct{}
-
-// PaymentRequest represents a payment request
-type PaymentRequest struct {
-	BookingID     string  `json:"booking_id"`
-	Amount        float64 `json:"amount"`
-	Currency      string  `json:"currency"`
-	PaymentMethod string  `json:"payment_method"`
-	CustomerID    string  `json:"customer_id"`
+type Service struct {
+	paymentsHandler *phandlers.PaymentsHandler
+	relay           *prelay.OutboxRelay
 }
 
-// PaymentResponse represents a payment result
-type PaymentResponse struct {
-	ID          string  `json:"id"`
-	BookingID   string  `json:"booking_id"`
-	Amount      float64 `json:"amount"`
-	Currency    string  `json:"currency"`
-	Status      string  `json:"status"`
-	Reference   string  `json:"reference"`
-	ProcessedAt string  `json:"processed_at"`
-}
+var serviceInstance *Service
+var serviceOnce sync.Once
 
-// CreatePayment processes a payment
-//
-//encore:api auth method=POST path=/v1/payments
-func CreatePayment(ctx context.Context, req *PaymentRequest) (*PaymentResponse, error) {
-	fmt.Printf("💳 Processing payment: %s for ₦%.2f\n", req.PaymentMethod, req.Amount)
-	time.Sleep(2 * time.Second)
+func initService() (*Service, error) {
+	var initErr error
 
-	paymentID := generateID()
-	reference := fmt.Sprintf("PAY-%s", paymentID)
-
-	success := time.Now().Unix()%20 != 0
-
-	if success {
-		response := &PaymentResponse{
-			ID:          paymentID,
-			BookingID:   req.BookingID,
-			Amount:      req.Amount,
-			Currency:    req.Currency,
-			Status:      "success",
-			Reference:   reference,
-			ProcessedAt: time.Now().Format(time.RFC3339),
-		}
-
-		envelope := &eventscommon.EventEnvelope[eventscommon.BookingEvent]{
-			EventID:       eventscommon.GenerateEventID(),
-			EventType:     "payment.v1.confirmed",
-			OccurredAt:    time.Now(),
-			CorrelationID: req.BookingID,
-			Producer:      "payment-service",
-			Data: eventscommon.BookingEvent{
-				BookingID:      req.BookingID,
-				PaymentID:      paymentID,
-				Amount:         req.Amount,
-				Status:         "confirmed",
-				PreviousStatus: "payment_pending",
-				Timestamp:      time.Now(),
-				UserID:         req.CustomerID,
-			},
-		}
-
-		_, err := topics_payment.PaymentConfirmedTopic.Publish(ctx, envelope)
+	serviceOnce.Do(func() {
+		handlerConfig, err := phandlers.NewPaymentConfig(secrets.PublicBaseURL, secrets.AppReturnURL, secrets.ReturnContextKey)
 		if err != nil {
-			return nil, err
+			initErr = err
+			return
 		}
 
-		fmt.Printf("✅ Payment confirmed: %s\n", reference)
-		return response, nil
-	}
+		paymentGormDB, err := gorm.Open(postgres.New(postgres.Config{
+			Conn: PaymentDB.Stdlib(),
+		}), &gorm.Config{})
+		if err != nil {
+			initErr = err
+			return
+		}
 
-	// Payment failed
-	reason := "insufficient_funds"
-	response := &PaymentResponse{
-		ID:          paymentID,
-		BookingID:   req.BookingID,
-		Amount:      req.Amount,
-		Currency:    req.Currency,
-		Status:      "failed",
-		Reference:   reference,
-		ProcessedAt: time.Now().Format(time.RFC3339),
-	}
+		coreGormDB, err := gorm.Open(postgres.New(postgres.Config{
+			Conn: coredb.ProtisanDB.Stdlib(),
+		}), &gorm.Config{})
+		if err != nil {
+			initErr = err
+			return
+		}
 
-	envelope := &eventscommon.EventEnvelope[eventscommon.BookingEvent]{
-		EventID:       eventscommon.GenerateEventID(),
-		EventType:     "payment.v1.failed",
-		OccurredAt:    time.Now(),
-		CorrelationID: req.BookingID,
-		Producer:      "payment-service",
-		Data: eventscommon.BookingEvent{
-			BookingID:      req.BookingID,
-			PaymentID:      paymentID,
-			Amount:         req.Amount,
-			Status:         "payment_pending",
-			PreviousStatus: "payment_pending",
-			Timestamp:      time.Now(),
-			UserID:         req.CustomerID,
-			Reason:         &reason,
-		},
-	}
+		repo := prepos.NewTransactionRepository(paymentGormDB, coreGormDB)
 
-	_, err := topics_payment.PaymentFailedTopic.Publish(ctx, envelope)
+		nombaProvider, err := pproviders.NewNombaProvider(
+			cache.NewInMemoryCache(),
+			secrets.NombaApi,
+			secrets.NombaClientID,
+			secrets.NombaClientSecret,
+			secrets.NombaSignatureKey,
+			secrets.NombaAccountID,
+		)
+		if err != nil {
+			initErr = err
+			return
+		}
+
+		providers := map[string]pdomain.PaymentProvider{
+			nombaProvider.Identifier(): nombaProvider,
+		}
+
+		relayInstance := prelay.NewOutboxRelay(coreGormDB, corerelay.DefaultConfig())
+		go relayInstance.Start(context.Background())
+
+		serviceInstance = &Service{
+			paymentsHandler: phandlers.NewPaymentsHandler(repo, providers, phandlers.WithPaymentConfig(handlerConfig)),
+			relay:           relayInstance,
+		}
+	})
+
+	return serviceInstance, initErr
+}
+
+//encore:api auth method=POST path=/v1/payments/initialize
+func (s *Service) InitializePayment(ctx context.Context, req *phandlers.InitializePaymentRequest) (*phandlers.InitializePaymentResponse, error) {
+	return s.paymentsHandler.InitializePayment(ctx, req)
+}
+
+//encore:api auth method=GET path=/v1/payments/transactions/:transactionId
+func (s *Service) GetPayment(ctx context.Context, transactionId string) (*phandlers.PaymentStatusResponse, error) {
+	return s.paymentsHandler.GetPayment(ctx, transactionId)
+}
+
+//encore:api public raw path=/v1/payments/webhook/nomba
+func (s *Service) NombaWebhook(w http.ResponseWriter, req *http.Request) {
+	s.paymentsHandler.NombaWebhook(w, req)
+}
+
+func (s *Service) ProviderWebhook(providerID string, w http.ResponseWriter, req *http.Request) {
+	s.paymentsHandler.ProviderWebhook(providerID, w, req)
+}
+
+var _ = cron.NewJob("payment-outbox-repair", cron.JobConfig{
+	Title:    "Repair Missing Payment Outbox Events",
+	Every:    5 * cron.Minute,
+	Endpoint: RepairPaymentOutboxEvents,
+})
+
+//encore:api private method=POST path=/internal/payments/repair-outbox-events
+func RepairPaymentOutboxEvents(ctx context.Context) error {
+	svc, err := initService()
+	if err != nil {
+		return err
+	}
+	_, err = svc.paymentsHandler.RepairPaymentOutboxEvents(ctx)
+	return err
+}
+
+var _ = cron.NewJob("payment-webhook-event-cleanup", cron.JobConfig{
+	Title:    "Cleanup Processed Payment Webhook Events",
+	Every:    24 * 60 * cron.Minute,
+	Endpoint: CleanupWebhookEvents,
+})
+
+//encore:api private method=POST path=/internal/payments/cleanup-webhook-events
+func CleanupWebhookEvents(ctx context.Context) error {
+	svc, err := initService()
+	if err != nil {
+		return err
+	}
+	return svc.paymentsHandler.CleanupWebhookEvents(ctx, time.Now().Add(-webhookEventRetention))
+}
+
+//encore:api private method=GET path=/internal/payments/diagnostics
+func PaymentDiagnostics(ctx context.Context) (*phandlers.PaymentDiagnosticsResponse, error) {
+	svc, err := initService()
 	if err != nil {
 		return nil, err
 	}
-
-	fmt.Printf("❌ Payment failed: %s\n", reason)
-	return response, nil
+	return svc.paymentsHandler.Diagnostics(ctx)
 }
 
-// SimulatePaymentSuccess forces a successful payment
-//
-//encore:api auth method=POST path=/v1/payments/simulate-success
-func SimulatePaymentSuccess(ctx context.Context, req *PaymentRequest) (*PaymentResponse, error) {
-	time.Sleep(1 * time.Second)
-
-	paymentID := generateID()
-	reference := fmt.Sprintf("PAY-SIM-%s", paymentID)
-
-	response := &PaymentResponse{
-		ID:          paymentID,
-		BookingID:   req.BookingID,
-		Amount:      req.Amount,
-		Currency:    req.Currency,
-		Status:      "success",
-		Reference:   reference,
-		ProcessedAt: time.Now().Format(time.RFC3339),
-	}
-
-	envelope := &eventscommon.EventEnvelope[eventscommon.BookingEvent]{
-		EventID:       eventscommon.GenerateEventID(),
-		EventType:     "payment.v1.confirmed",
-		OccurredAt:    time.Now(),
-		CorrelationID: req.BookingID,
-		Producer:      "payment-service",
-		Data: eventscommon.BookingEvent{
-			BookingID:      req.BookingID,
-			PaymentID:      paymentID,
-			Amount:         req.Amount,
-			Status:         "confirmed",
-			PreviousStatus: "payment_pending",
-			Timestamp:      time.Now(),
-			UserID:         req.CustomerID,
-		},
-	}
-
-	_, err := topics_payment.PaymentConfirmedTopic.Publish(ctx, envelope)
-	return response, err
+//encore:api public raw path=/checkout/complete
+func (s *Service) CheckoutComplete(w http.ResponseWriter, req *http.Request) {
+	s.paymentsHandler.HostedCheckoutCallback(w, req, "complete")
 }
 
-func generateID() string {
-	return fmt.Sprintf("%d", time.Now().UnixNano())
+//encore:api public raw path=/checkout/cancel
+func (s *Service) CheckoutCancel(w http.ResponseWriter, req *http.Request) {
+	s.paymentsHandler.HostedCheckoutCallback(w, req, "cancel")
 }

@@ -1,3 +1,6 @@
+//go:build encore_relay_load
+// +build encore_relay_load
+
 package booking
 
 import (

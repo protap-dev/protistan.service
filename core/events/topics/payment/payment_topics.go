@@ -5,10 +5,10 @@ import (
 	"encore.dev/pubsub"
 )
 
-var PaymentConfirmedTopic = pubsub.NewTopic[*eventscommon.EventEnvelope[eventscommon.BookingEvent]]("payment-v1-confirmed", pubsub.TopicConfig{
+var PaymentConfirmedTopic = pubsub.NewTopic[*eventscommon.EventEnvelope[eventscommon.PaymentEvent]]("payment-v1-confirmed", pubsub.TopicConfig{
 	DeliveryGuarantee: pubsub.AtLeastOnce,
 })
 
-var PaymentFailedTopic = pubsub.NewTopic[*eventscommon.EventEnvelope[eventscommon.BookingEvent]]("payment-v1-failed", pubsub.TopicConfig{
+var PaymentFailedTopic = pubsub.NewTopic[*eventscommon.EventEnvelope[eventscommon.PaymentEvent]]("payment-v1-failed", pubsub.TopicConfig{
 	DeliveryGuarantee: pubsub.AtLeastOnce,
 })
