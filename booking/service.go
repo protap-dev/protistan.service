@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"log"
 	"sync"
+	"time"
 
 	"encore.app/booking/domain"
 	"encore.app/booking/events"
@@ -20,6 +21,7 @@ import (
 	topics_payment "encore.app/core/events/topics/payment"
 	topics_quote "encore.app/core/events/topics/quotes"
 	corerelay "encore.app/core/relay"
+	"encore.dev/beta/errs"
 	"encore.dev/cron"
 	"encore.dev/pubsub"
 	"encore.dev/storage/sqldb"
@@ -31,6 +33,29 @@ import (
 type Service struct {
 	bookingsHandler *handlers.BookingsHandler
 	relay           *relay.OutboxRelay // For graceful shutdown
+}
+
+type MarkPaymentPendingRequest struct {
+	UserID         string    `json:"user_id"`
+	QuoteID        string    `json:"quote_id"`
+	ReservationKey string    `json:"reservation_key"`
+	ReservedUntil  time.Time `json:"reserved_until"`
+}
+
+type ReleasePaymentReservationRequest struct {
+	UserID         string  `json:"user_id"`
+	QuoteID        string  `json:"quote_id"`
+	ReservationKey string  `json:"reservation_key"`
+	Reason         *string `json:"reason,omitempty"`
+}
+
+type BookingPaymentStatusResponse struct {
+	BookingID      string               `json:"booking_id"`
+	Status         domain.BookingStatus `json:"status"`
+	QuoteID        string               `json:"quote_id,omitempty"`
+	ReservationKey string               `json:"reservation_key,omitempty"`
+	ReservedUntil  *time.Time           `json:"reserved_until,omitempty"`
+	UpdatedAt      time.Time            `json:"updated_at"`
 }
 
 // BookingDB initializes the booking service database
@@ -112,6 +137,102 @@ func (s *Service) UpdateBookingStatus(ctx context.Context, id string, req *handl
 //encore:api auth method=GET path=/v0/bookings/:id
 func (s *Service) GetBooking(ctx context.Context, id string) (*handlers.BookingResponse, error) {
 	return s.bookingsHandler.GetBooking(ctx, id)
+}
+
+//encore:api private method=PUT path=/internal/bookings/:id/payment-pending
+func (s *Service) MarkPaymentPending(ctx context.Context, id string, req *MarkPaymentPendingRequest) (*BookingPaymentStatusResponse, error) {
+	if req == nil {
+		return nil, errs.B().Code(errs.InvalidArgument).Msg("payment reservation request is required").Err()
+	}
+	if req.UserID == "" {
+		return nil, errs.B().Code(errs.InvalidArgument).Msg("user_id is required").Err()
+	}
+	if req.QuoteID == "" {
+		return nil, errs.B().Code(errs.InvalidArgument).Msg("quote_id is required").Err()
+	}
+	if req.ReservationKey == "" {
+		return nil, errs.B().Code(errs.InvalidArgument).Msg("reservation_key is required").Err()
+	}
+	if !req.ReservedUntil.After(time.Now()) {
+		return nil, errs.B().Code(errs.InvalidArgument).Msg("reserved_until must be in the future").Err()
+	}
+
+	current, err := s.bookingsHandler.GetRepository().GetByID(ctx, id)
+	if err != nil {
+		return nil, err
+	}
+
+	if current.Status == domain.BookingPaymentPending {
+		if domain.PaymentReservationMatches(current, req.QuoteID, req.ReservationKey) {
+			return paymentReservationResponse(current), nil
+		}
+		if !domain.PaymentReservationExpired(current, time.Now()) {
+			return nil, errs.B().Code(errs.FailedPrecondition).Msg("booking is already reserved for payment").Err()
+		}
+		return s.applyPaymentReservationAndMarkPending(ctx, id, current, req)
+	}
+
+	if current.Status != domain.BookingQuoteAccepted {
+		return nil, errs.B().Code(errs.FailedPrecondition).Msg("booking must be quote_accepted before payment initialization").Err()
+	}
+
+	return s.applyPaymentReservationAndMarkPending(ctx, id, current, req)
+}
+
+func (s *Service) applyPaymentReservationAndMarkPending(ctx context.Context, id string, current *domain.Booking, req *MarkPaymentPendingRequest) (*BookingPaymentStatusResponse, error) {
+	domain.ApplyPaymentReservation(current, domain.PaymentReservation{
+		QuoteID:        req.QuoteID,
+		ReservationKey: req.ReservationKey,
+		ReservedBy:     req.UserID,
+		ReservedUntil:  req.ReservedUntil,
+	})
+	if err := s.bookingsHandler.UpdateBookingStatusInternal(ctx, id, domain.BookingPaymentPending, req.UserID, nil, current, nil, nil); err != nil {
+		return nil, err
+	}
+
+	updated, err := s.bookingsHandler.GetRepository().GetByID(ctx, id)
+	if err != nil {
+		return nil, err
+	}
+
+	return paymentReservationResponse(updated), nil
+}
+
+//encore:api private method=PUT path=/internal/bookings/:id/payment-reservation/release
+func (s *Service) ReleasePaymentReservation(ctx context.Context, id string, req *ReleasePaymentReservationRequest) (*BookingPaymentStatusResponse, error) {
+	if req == nil {
+		return nil, errs.B().Code(errs.InvalidArgument).Msg("payment reservation release request is required").Err()
+	}
+	if req.UserID == "" {
+		return nil, errs.B().Code(errs.InvalidArgument).Msg("user_id is required").Err()
+	}
+	if req.QuoteID == "" {
+		return nil, errs.B().Code(errs.InvalidArgument).Msg("quote_id is required").Err()
+	}
+	if req.ReservationKey == "" {
+		return nil, errs.B().Code(errs.InvalidArgument).Msg("reservation_key is required").Err()
+	}
+
+	current, err := s.bookingsHandler.GetRepository().GetByID(ctx, id)
+	if err != nil {
+		return nil, err
+	}
+	if current.Status != domain.BookingPaymentPending {
+		return paymentReservationResponse(current), nil
+	}
+	if !domain.PaymentReservationMatches(current, req.QuoteID, req.ReservationKey) {
+		return nil, errs.B().Code(errs.FailedPrecondition).Msg("payment reservation does not match active booking reservation").Err()
+	}
+
+	domain.ClearPaymentReservation(current)
+	if err := s.bookingsHandler.UpdateBookingStatusInternal(ctx, id, domain.BookingQuoteAccepted, req.UserID, req.Reason, current, nil, nil); err != nil {
+		return nil, err
+	}
+	updated, err := s.bookingsHandler.GetRepository().GetByID(ctx, id)
+	if err != nil {
+		return nil, err
+	}
+	return paymentReservationResponse(updated), nil
 }
 
 //encore:api auth method=GET path=/v0/bookings
@@ -202,14 +323,14 @@ var _ = pubsub.NewSubscription(
 
 var _ = pubsub.NewSubscription(
 	topics_payment.PaymentConfirmedTopic, "handle-payment-confirmed",
-	pubsub.SubscriptionConfig[*eventscommon.EventEnvelope[domain.BookingEvent]]{
-		Handler: func(ctx context.Context, envelope *eventscommon.EventEnvelope[domain.BookingEvent]) error {
-			domainEvent := convertToDomainEvent(&envelope.Data)
+	pubsub.SubscriptionConfig[*eventscommon.EventEnvelope[eventscommon.PaymentEvent]]{
+		Handler: func(ctx context.Context, envelope *eventscommon.EventEnvelope[eventscommon.PaymentEvent]) error {
+			domainEvent := paymentConfirmedToBookingEvent(&envelope.Data)
 
 			ctx = eventscommon.WithEventMetadata(ctx, &binternal.EventMetadata{
 				CorrelationID: envelope.CorrelationID,
 				CausationID:   envelope.EventID,
-				UserID:        envelope.Data.UserID,
+				UserID:        envelope.Data.CustomerID,
 			})
 
 			s, err := initService()
@@ -223,14 +344,14 @@ var _ = pubsub.NewSubscription(
 
 var _ = pubsub.NewSubscription(
 	topics_payment.PaymentFailedTopic, "handle-payment-failed",
-	pubsub.SubscriptionConfig[*eventscommon.EventEnvelope[domain.BookingEvent]]{
-		Handler: func(ctx context.Context, envelope *eventscommon.EventEnvelope[domain.BookingEvent]) error {
-			domainEvent := convertToDomainEvent(&envelope.Data)
+	pubsub.SubscriptionConfig[*eventscommon.EventEnvelope[eventscommon.PaymentEvent]]{
+		Handler: func(ctx context.Context, envelope *eventscommon.EventEnvelope[eventscommon.PaymentEvent]) error {
+			domainEvent := paymentFailedToBookingEvent(&envelope.Data)
 
 			ctx = eventscommon.WithEventMetadata(ctx, &binternal.EventMetadata{
 				CorrelationID: envelope.CorrelationID,
 				CausationID:   envelope.EventID,
-				UserID:        envelope.Data.UserID,
+				UserID:        envelope.Data.CustomerID,
 			})
 
 			s, err := initService()
@@ -263,17 +384,55 @@ var _ = pubsub.NewSubscription(
 	},
 )
 
-// Helper function to convert common event to domain event
-func convertToDomainEvent(commonEvent *domain.BookingEvent) *domain.BookingEvent {
+func paymentConfirmedToBookingEvent(paymentEvent *eventscommon.PaymentEvent) *domain.BookingEvent {
 	return &domain.BookingEvent{
-		BookingID:      commonEvent.BookingID,
-		Status:         domain.BookingStatus(commonEvent.Status),
-		PreviousStatus: domain.BookingStatus(commonEvent.PreviousStatus),
-		Timestamp:      commonEvent.Timestamp,
-		UserID:         commonEvent.UserID,
-		ArtisanID:      commonEvent.ArtisanID,
-		Reason:         commonEvent.Reason,
+		BookingID:      paymentEvent.BookingID,
+		Status:         domain.BookingConfirmed,
+		PreviousStatus: domain.BookingPaymentPending,
+		Timestamp:      paymentEvent.Timestamp,
+		UserID:         paymentEvent.CustomerID,
+		Metadata: map[string]string{
+			domain.PaymentReservationKeyMeta:     paymentEvent.ReservationKey,
+			domain.PaymentReservationQuoteIDMeta: paymentEvent.QuoteID,
+		},
 	}
+}
+
+func paymentFailedToBookingEvent(paymentEvent *eventscommon.PaymentEvent) *domain.BookingEvent {
+	reason := paymentEvent.Reason
+	if reason == nil {
+		defaultReason := "payment_failed"
+		reason = &defaultReason
+	}
+
+	return &domain.BookingEvent{
+		BookingID:      paymentEvent.BookingID,
+		Status:         domain.BookingQuoteAccepted,
+		PreviousStatus: domain.BookingPaymentPending,
+		Timestamp:      paymentEvent.Timestamp,
+		UserID:         paymentEvent.CustomerID,
+		Reason:         reason,
+		Metadata: map[string]string{
+			domain.PaymentReservationKeyMeta:     paymentEvent.ReservationKey,
+			domain.PaymentReservationQuoteIDMeta: paymentEvent.QuoteID,
+		},
+	}
+}
+
+func paymentReservationResponse(booking *domain.Booking) *BookingPaymentStatusResponse {
+	resp := &BookingPaymentStatusResponse{
+		BookingID: booking.ID,
+		Status:    booking.Status,
+		UpdatedAt: booking.UpdatedAt,
+	}
+	reservation, ok := domain.PaymentReservationFromBooking(booking)
+	if !ok {
+		return resp
+	}
+	resp.QuoteID = reservation.QuoteID
+	resp.ReservationKey = reservation.ReservationKey
+	resp.ReservedUntil = &reservation.ReservedUntil
+	return resp
 }
 
 func (s *Service) OnQuoteProposed(ctx context.Context, quoteEvent *eventscommon.QuoteEvent) error {
@@ -358,6 +517,16 @@ func (s *Service) OnPaymentConfirmed(ctx context.Context, event *domain.BookingE
 	if err != nil {
 		return err
 	}
+	if current.Status == domain.BookingConfirmed {
+		return nil
+	}
+	if current.Status != domain.BookingPaymentPending {
+		return nil
+	}
+	if !domain.PaymentReservationMatches(current, event.Metadata[domain.PaymentReservationQuoteIDMeta], event.Metadata[domain.PaymentReservationKeyMeta]) {
+		return nil
+	}
+	domain.ClearPaymentReservation(current)
 	return s.bookingsHandler.UpdateBookingStatusInternal(ctx, event.BookingID, domain.BookingConfirmed, event.UserID, nil, current, nil, nil)
 }
 
@@ -372,6 +541,9 @@ func (s *Service) OnPaymentFailed(ctx context.Context, event *domain.BookingEven
 		// Idempotent - if booking is not in payment pending, we've already handled this failure
 		return nil
 	}
+	if !domain.PaymentReservationMatches(current, event.Metadata[domain.PaymentReservationQuoteIDMeta], event.Metadata[domain.PaymentReservationKeyMeta]) {
+		return nil
+	}
 
 	// Check if this is actually a payment failure event (indicated by reason)
 	if event.Reason == nil || *event.Reason != "payment_failed" {
@@ -380,6 +552,7 @@ func (s *Service) OnPaymentFailed(ctx context.Context, event *domain.BookingEven
 	}
 
 	// Transition back to quote accepted state
+	domain.ClearPaymentReservation(current)
 	return s.bookingsHandler.UpdateBookingStatusInternal(ctx, event.BookingID, domain.BookingQuoteAccepted, event.UserID, event.Reason, current, nil, nil)
 }
 

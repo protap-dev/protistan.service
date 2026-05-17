@@ -1,0 +1,1 @@
+DROP INDEX IF EXISTS idx_transactions_booking_quote_status;
