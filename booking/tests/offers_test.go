@@ -1,4 +1,4 @@
-package handlers_test
+package booking
 
 import (
 	"context"
