@@ -31,6 +31,8 @@ func setupOfferExpiryTest(t *testing.T) (*handlers.BookingsHandler, *gorm.DB, fu
 	}), &gorm.Config{})
 	require.NoError(t, err)
 
+	ensureOutboxTable(t, gormDB)
+
 	coreSvc := core.NewCoreService(gormDB)
 	logger := binternal.NewServiceLogger("test")
 	authHelper := binternal.NewAuthHelper(logger)
@@ -57,15 +59,15 @@ func createTestBookingForOffer(t *testing.T, db *gorm.DB, bookingID string) {
 	err := db.Exec(`
         INSERT INTO bookings (
             id, customer_id, service_category_id, customer_address_id,
-            title, description, status, priority, estimated_duration_mins,
+            title, description, status, priority,
             metadata, is_specific_artisan, offers_count,
             created_at, updated_at, version
         )
-        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15)
+        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14)
         ON CONFLICT (id) DO NOTHING
     `, bookingID, uuid.New().String(), uuid.New().String(), uuid.New().String(),
 		"Test Booking for Offers", "Minimal booking for offer expiry tests",
-		"requested", "normal", 60, "{}", false, 0,
+		"requested", "normal", "{}", false, 0,
 		time.Now(), time.Now(), 1).Error
 	require.NoError(t, err, "failed to create test booking")
 }
