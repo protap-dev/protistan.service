@@ -32,6 +32,8 @@ var QuoteDB = sqldb.NewDatabase("quote", sqldb.DatabaseConfig{
 	Migrations: "./migrations",
 })
 
+type PaymentQuoteResponse = handlers.PaymentQuoteResponse
+
 var serviceInstance *Service
 var serviceOnce sync.Once
 
@@ -113,6 +115,17 @@ func GetQuote(ctx context.Context, id string) (*handlers.QuoteResponse, error) {
 		return nil, err
 	}
 	return svc.QuotesHandler.GetQuote(ctx, id)
+}
+
+// GetQuoteForPayment retrieves the minimal quote data needed for payment initialization.
+//
+//encore:api private method=GET path=/internal/quote/:id/payment
+func GetQuoteForPayment(ctx context.Context, id string) (*handlers.PaymentQuoteResponse, error) {
+	svc, err := initService()
+	if err != nil {
+		return nil, err
+	}
+	return svc.QuotesHandler.GetQuoteForPayment(ctx, id)
 }
 
 // AcceptQuote accepts a proposed quote
