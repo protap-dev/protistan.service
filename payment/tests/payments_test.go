@@ -1111,6 +1111,232 @@ func TestInitializePaymentBlocksRetryWhenVerifyReturnsSuccessVariant(t *testing.
 	provider.AssertExpectations(t)
 }
 
+func TestInitializePaymentRetriesWhenSuccessVerificationFailsValidation(t *testing.T) {
+	repo := new(mockRepository)
+	provider := new(mockProvider)
+
+	h := handlers.NewPaymentsHandler(
+		repo,
+		map[string]domain.PaymentProvider{"nomba": provider},
+		handlers.WithBookingGetter(func(ctx context.Context, id string) (*bookinghandlers.BookingResponse, error) {
+			return &bookinghandlers.BookingResponse{
+				ID:         id,
+				CustomerID: "customer-1",
+				Status:     bdomain.BookingPaymentPending,
+			}, nil
+		}),
+		handlers.WithQuoteGetter(func(ctx context.Context, id string) (*quote.PaymentQuoteResponse, error) {
+			return &quote.PaymentQuoteResponse{
+				ID:          id,
+				BookingID:   "booking-1",
+				State:       "accepted",
+				AmountCents: 1050000,
+				Currency:    "NGN",
+			}, nil
+		}),
+		handlers.WithBookingPaymentPendingUpdater(func(ctx context.Context, id string, req *booking.MarkPaymentPendingRequest) (*booking.BookingPaymentStatusResponse, error) {
+			return &booking.BookingPaymentStatusResponse{
+				BookingID: id,
+				Status:    bdomain.BookingPaymentPending,
+				UpdatedAt: time.Now(),
+			}, nil
+		}),
+		handlers.WithCustomerEmailGetter(func(ctx context.Context, customerID string) (string, error) {
+			return "customer@example.com", nil
+		}),
+		handlers.WithUserIDProvider(func() (string, bool) {
+			return "customer-1", true
+		}),
+		handlers.WithPaymentConfig(handlers.PaymentConfig{
+			PublicBaseURL:       "https://pay.example.com",
+			AppReturnURL:        "protisan://payment-return",
+			ReturnContextSecret: "test-secret",
+		}),
+	)
+
+	repo.On("GetPendingByBookingAndQuote", mock.Anything, "booking-1", "quote-1").Return(&domain.Transaction{
+		ID:               "txn-pending",
+		CustomerID:       "customer-1",
+		BookingID:        "booking-1",
+		QuoteID:          "quote-1",
+		AmountCents:      1050000,
+		Provider:         "nomba",
+		Currency:         "NGN",
+		Status:           domain.TxPending,
+		InternalRef:      "TXN-pending",
+		CurrentAttemptID: strPtr("attempt-old"),
+		Metadata: map[string]string{
+			"payment_reservation_key": "reservation-existing",
+		},
+	}, nil)
+	repo.On("GetCurrentAttemptByTransactionID", mock.Anything, "txn-pending").Return(&domain.PaymentAttempt{
+		ID:            "attempt-old",
+		TransactionID: "txn-pending",
+		AttemptNo:     1,
+		Provider:      "nomba",
+		Status:        domain.AttemptActive,
+		InternalRef:   "TXN-pending",
+	}, nil)
+	provider.On("Cancel", mock.Anything, "TXN-pending").Return(assert.AnError)
+	provider.On("Verify", mock.Anything, "TXN-pending").Return(&domain.VerificationResponse{
+		Status:        "SUCCESS",
+		TransactionID: "PAY-success",
+		AmountCents:   999,
+		Currency:      "NGN",
+	}, nil)
+	repo.On("GetByID", mock.Anything, "txn-pending").Return(&domain.Transaction{
+		ID:               "txn-pending",
+		CustomerID:       "customer-1",
+		BookingID:        "booking-1",
+		QuoteID:          "quote-1",
+		AmountCents:      1050000,
+		Provider:         "nomba",
+		Currency:         "NGN",
+		Status:           domain.TxPending,
+		InternalRef:      "TXN-pending",
+		CurrentAttemptID: strPtr("attempt-old"),
+		Metadata: map[string]string{
+			"payment_reservation_key": "reservation-existing",
+		},
+	}, nil).Once()
+	repo.On("UpdateAttempt", mock.Anything, mock.MatchedBy(func(attempt *domain.PaymentAttempt) bool {
+		return attempt.ID == "attempt-old" && attempt.Status == domain.AttemptSuperseded
+	})).Return(nil).Once()
+	repo.On("CountAttemptsByTransactionID", mock.Anything, "txn-pending").Return(int64(1), nil)
+	repo.On("CreateAttempt", mock.Anything, mock.MatchedBy(func(attempt *domain.PaymentAttempt) bool {
+		return attempt.TransactionID == "txn-pending" &&
+			attempt.AttemptNo == 2 &&
+			attempt.Status == domain.AttemptInitializing
+	})).Return(nil)
+	provider.On("Initialize", mock.Anything, mock.MatchedBy(func(req *domain.InitializationRequest) bool {
+		return req.OrderReference != "TXN-pending"
+	})).Return(&domain.InitializationResponse{
+		CheckoutLink: "https://sandbox.nomba.com/checkout/order/new",
+		OrderRef:     "TXN-pending-new",
+	}, nil)
+	repo.On("UpdateAttempt", mock.Anything, mock.MatchedBy(func(attempt *domain.PaymentAttempt) bool {
+		return attempt.ID == "attempt-old" && attempt.SupersededByAttemptID != nil && *attempt.SupersededByAttemptID == "test-attempt-id"
+	})).Return(nil).Once()
+	repo.On("Update", mock.Anything, mock.MatchedBy(func(txn *domain.Transaction) bool {
+		return txn.CurrentAttemptID != nil && *txn.CurrentAttemptID == "test-attempt-id" && txn.InternalRef != "TXN-pending"
+	})).Return(nil)
+	repo.On("UpdateAttempt", mock.Anything, mock.MatchedBy(func(attempt *domain.PaymentAttempt) bool {
+		return attempt.ID == "test-attempt-id" &&
+			attempt.Status == domain.AttemptActive &&
+			attempt.CheckoutURL == "https://sandbox.nomba.com/checkout/order/new"
+	})).Return(nil)
+
+	res, err := h.InitializePayment(context.Background(), &handlers.InitializePaymentRequest{
+		BookingID: "booking-1",
+		QuoteID:   "quote-1",
+		Provider:  "nomba",
+	})
+
+	require.NoError(t, err)
+	require.NotNil(t, res)
+	assert.Equal(t, "txn-pending", res.TransactionID)
+	assert.Equal(t, "https://sandbox.nomba.com/checkout/order/new", res.CheckoutURL)
+	repo.AssertExpectations(t)
+	provider.AssertExpectations(t)
+}
+
+func TestInitializePaymentBlocksRetryWhenSuccessReconciliationFailsPersistence(t *testing.T) {
+	repo := new(mockRepository)
+	provider := new(mockProvider)
+
+	h := handlers.NewPaymentsHandler(
+		repo,
+		map[string]domain.PaymentProvider{"nomba": provider},
+		handlers.WithBookingGetter(func(ctx context.Context, id string) (*bookinghandlers.BookingResponse, error) {
+			return &bookinghandlers.BookingResponse{
+				ID:         id,
+				CustomerID: "customer-1",
+				Status:     bdomain.BookingPaymentPending,
+			}, nil
+		}),
+		handlers.WithQuoteGetter(func(ctx context.Context, id string) (*quote.PaymentQuoteResponse, error) {
+			return &quote.PaymentQuoteResponse{
+				ID:          id,
+				BookingID:   "booking-1",
+				State:       "accepted",
+				AmountCents: 1050000,
+				Currency:    "NGN",
+			}, nil
+		}),
+		handlers.WithCustomerEmailGetter(func(ctx context.Context, customerID string) (string, error) {
+			return "customer@example.com", nil
+		}),
+		handlers.WithUserIDProvider(func() (string, bool) {
+			return "customer-1", true
+		}),
+		handlers.WithPaymentConfig(handlers.PaymentConfig{
+			PublicBaseURL:       "https://pay.example.com",
+			AppReturnURL:        "protisan://payment-return",
+			ReturnContextSecret: "test-secret",
+		}),
+	)
+
+	repo.On("GetPendingByBookingAndQuote", mock.Anything, "booking-1", "quote-1").Return(&domain.Transaction{
+		ID:               "txn-pending",
+		CustomerID:       "customer-1",
+		BookingID:        "booking-1",
+		QuoteID:          "quote-1",
+		AmountCents:      1050000,
+		Provider:         "nomba",
+		Currency:         "NGN",
+		Status:           domain.TxPending,
+		InternalRef:      "TXN-pending",
+		CurrentAttemptID: strPtr("attempt-old"),
+		Metadata: map[string]string{
+			"payment_reservation_key": "reservation-existing",
+		},
+	}, nil)
+	repo.On("GetCurrentAttemptByTransactionID", mock.Anything, "txn-pending").Return(&domain.PaymentAttempt{
+		ID:            "attempt-old",
+		TransactionID: "txn-pending",
+		AttemptNo:     1,
+		Provider:      "nomba",
+		Status:        domain.AttemptActive,
+		InternalRef:   "TXN-pending",
+	}, nil)
+	provider.On("Cancel", mock.Anything, "TXN-pending").Return(assert.AnError)
+	provider.On("Verify", mock.Anything, "TXN-pending").Return(&domain.VerificationResponse{
+		Status:        "SUCCESS",
+		TransactionID: "PAY-success",
+		AmountCents:   1050000,
+		Currency:      "NGN",
+	}, nil)
+	repo.On("GetByID", mock.Anything, "txn-pending").Return(&domain.Transaction{
+		ID:               "txn-pending",
+		CustomerID:       "customer-1",
+		BookingID:        "booking-1",
+		QuoteID:          "quote-1",
+		AmountCents:      1050000,
+		Provider:         "nomba",
+		Currency:         "NGN",
+		Status:           domain.TxPending,
+		InternalRef:      "TXN-pending",
+		CurrentAttemptID: strPtr("attempt-old"),
+		Metadata: map[string]string{
+			"payment_reservation_key": "reservation-existing",
+		},
+	}, nil).Once()
+	repo.On("UpdateAttempt", mock.Anything, mock.MatchedBy(func(attempt *domain.PaymentAttempt) bool {
+		return attempt.ID == "attempt-old" && attempt.Status == domain.AttemptSuccessful
+	})).Return(assert.AnError).Once()
+
+	res, err := h.InitializePayment(context.Background(), &handlers.InitializePaymentRequest{
+		BookingID: "booking-1",
+		QuoteID:   "quote-1",
+		Provider:  "nomba",
+	})
+
+	require.Error(t, err)
+	require.Nil(t, res)
+	repo.AssertExpectations(t)
+	provider.AssertExpectations(t)
+}
+
 func TestInitializePaymentRejectsProviderSwitchForPendingTransaction(t *testing.T) {
 	repo := new(mockRepository)
 	nombaProvider := new(mockProvider)
