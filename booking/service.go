@@ -58,6 +58,8 @@ type BookingPaymentStatusResponse struct {
 	UpdatedAt      time.Time            `json:"updated_at"`
 }
 
+const proposedQuoteIDMeta = "quote_id"
+
 // BookingDB initializes the booking service database
 var BookingDB = sqldb.NewDatabase("booking", sqldb.DatabaseConfig{
 	Migrations: "./migrations",
@@ -435,12 +437,31 @@ func paymentReservationResponse(booking *domain.Booking) *BookingPaymentStatusRe
 	return resp
 }
 
+func canApplyQuoteProposedEvent(status domain.BookingStatus) bool {
+	switch status {
+	case domain.BookingAssigned, domain.BookingPendingQuote, domain.BookingQuoteRejected:
+		return true
+	case domain.BookingQuoteProposed:
+		return false
+	default:
+		return false
+	}
+}
+
 func (s *Service) OnQuoteProposed(ctx context.Context, quoteEvent *eventscommon.QuoteEvent) error {
 	current, err := s.bookingsHandler.GetRepository().GetByID(ctx, quoteEvent.BookingID)
 	if err != nil {
 		log.Printf("[ERROR] Failed to get booking %s in OnQuoteProposed: %v",
 			quoteEvent.BookingID, err)
 		return err
+	}
+	if current.Status == domain.BookingQuoteProposed && current.Metadata != nil && current.Metadata[proposedQuoteIDMeta] == quoteEvent.QuoteID {
+		return nil
+	}
+	if current.Status != domain.BookingQuoteProposed && !canApplyQuoteProposedEvent(current.Status) {
+		log.Printf("[WARN] Ignoring QuoteProposed event for booking %s because it is in state %s",
+			quoteEvent.BookingID, current.Status)
+		return nil
 	}
 
 	rawData, err := json.Marshal(quoteEvent)
@@ -456,7 +477,7 @@ func (s *Service) OnQuoteProposed(ctx context.Context, quoteEvent *eventscommon.
 		quoteEvent.UserID,
 		nil,
 		current,
-		nil, // No manual metadata needed, details are in RawData
+		map[string]string{proposedQuoteIDMeta: quoteEvent.QuoteID},
 		rawData,
 	)
 
