@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"strings"
 	"time"
 
 	corerepo "encore.app/core/repository"
@@ -35,6 +36,9 @@ func NewQuoteRepository(db *gorm.DB, coreDB *gorm.DB) domain.QuoteRepository {
 func (r *QuoteRepository) Create(ctx context.Context, quote *domain.Quote) error {
 	result := r.db.WithContext(ctx).Create(quote)
 	if result.Error != nil {
+		if isActiveProposedQuoteConstraintError(result.Error) {
+			return domain.ErrActiveQuoteExists
+		}
 		return fmt.Errorf("failed to create quote: %w", result.Error)
 	}
 	return nil
@@ -103,6 +107,24 @@ func (r *QuoteRepository) GetByBookingID(ctx context.Context, bookingID string) 
 	}
 
 	return quotes, nil
+}
+
+// GetActiveProposedByBookingID retrieves the pending proposed quote for a booking, if any.
+func (r *QuoteRepository) GetActiveProposedByBookingID(ctx context.Context, bookingID string) (*domain.Quote, error) {
+	var quote domain.Quote
+	result := r.db.WithContext(ctx).
+		Where("booking_id = ? AND state = ?", bookingID, domain.QuoteProposed).
+		Order("version DESC, created_at DESC").
+		First(&quote)
+
+	if result.Error != nil {
+		if errors.Is(result.Error, gorm.ErrRecordNotFound) {
+			return nil, domain.ErrQuoteNotFound
+		}
+		return nil, fmt.Errorf("failed to get active proposed quote by booking ID: %w", result.Error)
+	}
+
+	return &quote, nil
 }
 
 // GetLatestVersionByBookingID retrieves only the latest version number for a booking
@@ -235,4 +257,22 @@ func getTopicForState(state string) string {
 	default:
 		return "quote-v1-state-changed"
 	}
+}
+
+func isDuplicateKeyError(err error) bool {
+	if err == nil {
+		return false
+	}
+	if errors.Is(err, gorm.ErrDuplicatedKey) {
+		return true
+	}
+	message := strings.ToLower(err.Error())
+	return strings.Contains(message, "duplicate key") || strings.Contains(message, "unique constraint")
+}
+
+func isActiveProposedQuoteConstraintError(err error) bool {
+	if !isDuplicateKeyError(err) {
+		return false
+	}
+	return strings.Contains(strings.ToLower(err.Error()), "idx_quotes_one_active_proposed_per_booking")
 }
