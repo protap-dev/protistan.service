@@ -13,7 +13,9 @@ import (
 
 func buildStandardMetadata(event *bookingdomain.BookingEvent) (map[string]interface{}, error) {
 	metadata := map[string]interface{}{
-		"booking_id": event.BookingID,
+		"booking_id":      event.BookingID,
+		"booking_status":  string(event.Status),
+		"previous_status": string(event.PreviousStatus),
 	}
 
 	// 1. If RawData is present, unmarshal it first (contains rich typed data)
