@@ -325,15 +325,23 @@ func (s *BookingSubscriber) createAutomatedMessage(
 		return fmt.Errorf("failed to save message: %w", err)
 	}
 
+	var metadata json.RawMessage
+	if len(msg.Metadata) > 0 {
+		metadata = json.RawMessage(msg.Metadata)
+	}
+
 	// Broadcast to WebSocket (if users are connected)
 	s.wsManager.Broadcast(&handlers.WSMessage{
-		ID:       msg.ID,
-		ThreadID: msg.ThreadID,
-		SenderID: msg.SenderID,
-		Content:  msg.Content,
-		Status:   string(msg.Status),
-		SentAt:   now,
-		Metadata: json.RawMessage(msg.Metadata), // Include metadata in WebSocket broadcast
+		ID:             msg.ID,
+		ThreadID:       msg.ThreadID,
+		SenderID:       msg.SenderID,
+		Content:        msg.Content,
+		MessageType:    string(msg.MessageType),
+		Status:         string(msg.Status),
+		IdempotencyKey: msg.IdempotencyKey,
+		SentAt:         now,
+		Metadata:       metadata,
+		Type:           "message",
 	})
 
 	return nil

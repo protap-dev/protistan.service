@@ -65,3 +65,7 @@ CREATE TABLE quote_price_breakdown (
 );
 
 CREATE INDEX idx_quote_price_breakdown_quote_id ON quote_price_breakdown(quote_id);
+
+CREATE UNIQUE INDEX idx_quotes_one_active_proposed_per_booking
+    ON quotes (booking_id)
+    WHERE state = 'proposed';
