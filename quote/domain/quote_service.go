@@ -3,6 +3,7 @@ package domain
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"time"
 )
@@ -53,6 +54,14 @@ func (s *QuoteService) ProposeQuote(ctx context.Context, input *ProposeQuoteInpu
 	var quote *Quote
 	// Save in transaction
 	err = s.repo.WithTransaction(ctx, func(txRepo QuoteRepository) error {
+		activeQuote, err := txRepo.GetActiveProposedByBookingID(ctx, input.BookingID)
+		if err != nil && !errors.Is(err, ErrQuoteNotFound) {
+			return fmt.Errorf("failed to check active quote: %w", err)
+		}
+		if activeQuote != nil {
+			return ErrActiveQuoteExists
+		}
+
 		// Get latest version number
 		maxVersion, err := txRepo.GetLatestVersionByBookingID(ctx, input.BookingID)
 		if err != nil {

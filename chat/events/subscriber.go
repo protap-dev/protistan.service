@@ -327,13 +327,16 @@ func (s *BookingSubscriber) createAutomatedMessage(
 
 	// Broadcast to WebSocket (if users are connected)
 	s.wsManager.Broadcast(&handlers.WSMessage{
-		ID:       msg.ID,
-		ThreadID: msg.ThreadID,
-		SenderID: msg.SenderID,
-		Content:  msg.Content,
-		Status:   string(msg.Status),
-		SentAt:   now,
-		Metadata: json.RawMessage(msg.Metadata), // Include metadata in WebSocket broadcast
+		ID:             msg.ID,
+		ThreadID:       msg.ThreadID,
+		SenderID:       msg.SenderID,
+		Content:        msg.Content,
+		MessageType:    string(msg.MessageType),
+		Status:         string(msg.Status),
+		IdempotencyKey: msg.IdempotencyKey,
+		SentAt:         now,
+		Metadata:       json.RawMessage(msg.Metadata), // Include metadata in WebSocket broadcast
+		Type:           "message",
 	})
 
 	return nil

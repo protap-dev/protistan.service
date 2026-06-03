@@ -2,6 +2,7 @@ package handlers
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log"
 	"net/http"
@@ -11,6 +12,24 @@ import (
 	pdomain "encore.app/payment/domain"
 	"encore.dev/beta/errs"
 )
+
+var errVerifiedPaymentValidation = errors.New("provider verification validation failed")
+
+type verifiedPaymentValidationError struct {
+	reason string
+}
+
+func (e verifiedPaymentValidationError) Error() string {
+	return e.reason
+}
+
+func (e verifiedPaymentValidationError) Unwrap() error {
+	return errVerifiedPaymentValidation
+}
+
+func newVerifiedPaymentValidationError(reason string) error {
+	return verifiedPaymentValidationError{reason: reason}
+}
 
 // NombaWebhook handles the existing Nomba webhook route.
 func (h *PaymentsHandler) NombaWebhook(w http.ResponseWriter, req *http.Request) {
@@ -220,20 +239,20 @@ func (h *PaymentsHandler) processAttemptWebhook(ctx context.Context, providerID 
 
 func (h *PaymentsHandler) validateVerifiedPayment(txn *pdomain.Transaction, attempt *pdomain.PaymentAttempt, verified *pdomain.VerificationResponse) error {
 	if verified == nil {
-		return fmt.Errorf("missing provider verification response")
+		return newVerifiedPaymentValidationError("missing provider verification response")
 	}
 	if verified.OrderRef != "" && attempt != nil && verified.OrderRef != attempt.InternalRef {
-		return fmt.Errorf("provider verification reference mismatch")
+		return newVerifiedPaymentValidationError("provider verification reference mismatch")
 	}
 	verifiedAmountCents := verified.AmountCents
 	if verifiedAmountCents <= 0 {
-		return fmt.Errorf("provider verification amount missing")
+		return newVerifiedPaymentValidationError("provider verification amount missing")
 	}
 	if txn.AmountCents != verifiedAmountCents {
-		return fmt.Errorf("provider verification amount mismatch")
+		return newVerifiedPaymentValidationError("provider verification amount mismatch")
 	}
 	if verified.Currency != "" && !strings.EqualFold(txn.Currency, verified.Currency) {
-		return fmt.Errorf("provider verification currency mismatch")
+		return newVerifiedPaymentValidationError("provider verification currency mismatch")
 	}
 	return nil
 }
@@ -271,6 +290,13 @@ func (h *PaymentsHandler) cancelAttemptForRetry(ctx context.Context, provider pd
 		case "SUCCESS":
 			if err := h.processAttemptWebhook(ctx, attempt.Provider, attempt, verified, nil); err != nil {
 				log.Printf("payment retry reconciliation failed: attempt=%s status=%s error=%v", redactPaymentRef(attempt.ID), verified.Status, err)
+				if errors.Is(err, errVerifiedPaymentValidation) {
+					attempt.Status = pdomain.AttemptSuperseded
+					attempt.UpdatedAt = now
+					_ = h.repo.UpdateAttempt(ctx, attempt)
+					return nil
+				}
+				return errs.B().Code(errs.FailedPrecondition).Msg("payment status could not be reconciled; refresh payment status").Err()
 			}
 			return errs.B().Code(errs.FailedPrecondition).Msg("payment already completed; refresh payment status").Err()
 		case "FAILED":
