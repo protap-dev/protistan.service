@@ -20,6 +20,7 @@ var (
 	ErrInvalidTransition    = &QuoteError{Code: "invalid_transition", Message: "invalid state transition"}
 	ErrQuoteExpired         = &QuoteError{Code: "quote_expired", Message: "quote has expired"}
 	ErrQuoteAlreadyAccepted = &QuoteError{Code: "quote_already_accepted", Message: "quote already accepted"}
+	ErrActiveQuoteExists    = &QuoteError{Code: "active_quote_exists", Message: "a quote is already pending for this booking"}
 	ErrBreakdownMismatch    = &QuoteError{Code: "breakdown_mismatch", Message: "breakdown total does not match quote amount"}
 	ErrInvalidAmount        = &QuoteError{Code: "invalid_amount", Message: "quote amount must be positive"}
 	ErrInvalidBreakdownType = &QuoteError{Code: "invalid_breakdown_type", Message: "invalid breakdown item type"}
