@@ -15,7 +15,7 @@ func AuthorizeProposeQuote(ctx context.Context, userID string, bookingArtisanID 
 	}
 
 	// 3. Verify booking is in a state where quotes can be proposed
-	validStates := []string{"assigned", "pending_quote", "quote_rejected", "quote_proposed"}
+	validStates := []string{"assigned", "pending_quote", "quote_rejected"}
 	if !slices.Contains(validStates, bookingStatus) {
 		return errs.B().
 			Code(errs.FailedPrecondition).

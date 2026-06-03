@@ -435,12 +435,30 @@ func paymentReservationResponse(booking *domain.Booking) *BookingPaymentStatusRe
 	return resp
 }
 
+func canApplyQuoteProposedEvent(status domain.BookingStatus) bool {
+	switch status {
+	case domain.BookingAssigned, domain.BookingPendingQuote, domain.BookingQuoteRejected:
+		return true
+	case domain.BookingQuoteProposed:
+		return false
+	default:
+		return false
+	}
+}
+
 func (s *Service) OnQuoteProposed(ctx context.Context, quoteEvent *eventscommon.QuoteEvent) error {
 	current, err := s.bookingsHandler.GetRepository().GetByID(ctx, quoteEvent.BookingID)
 	if err != nil {
 		log.Printf("[ERROR] Failed to get booking %s in OnQuoteProposed: %v",
 			quoteEvent.BookingID, err)
 		return err
+	}
+	if !canApplyQuoteProposedEvent(current.Status) {
+		if current.Status != domain.BookingQuoteProposed {
+			log.Printf("[WARN] Ignoring QuoteProposed event for booking %s because it is in state %s",
+				quoteEvent.BookingID, current.Status)
+		}
+		return nil
 	}
 
 	rawData, err := json.Marshal(quoteEvent)

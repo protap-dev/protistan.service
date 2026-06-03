@@ -3,6 +3,7 @@ package handlers
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"time"
 
@@ -156,6 +157,9 @@ func (h *QuotesHandler) ProposeQuote(ctx context.Context, req *ProposeQuoteReque
 		h.logger.Error(ctx, "failed to propose quote", err, map[string]any{
 			"booking_id": req.BookingID,
 		})
+		if errors.Is(err, quotedomain.ErrActiveQuoteExists) {
+			return nil, errs.B().Code(errs.FailedPrecondition).Msg(quotedomain.ErrActiveQuoteExists.Message).Err()
+		}
 		return nil, err // Let the framework handle the error type
 	}
 
