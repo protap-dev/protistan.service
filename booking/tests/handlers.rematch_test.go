@@ -102,6 +102,7 @@ func TestRematchEligibilityValidation(t *testing.T) {
 		domain.BookingCompleted,
 		domain.BookingCancelled,
 		domain.BookingInProgress,
+		domain.BookingCompletionPending,
 		domain.BookingConfirmed,
 		domain.BookingEnroute,
 		domain.BookingPaymentPending,
@@ -162,13 +163,14 @@ func TestRematchEligibleStatesDocumentation(t *testing.T) {
 	}
 
 	ineligibleStates := map[domain.BookingStatus]string{
-		domain.BookingRequested:      "Too early - no artisan interaction yet",
-		domain.BookingConfirmed:      "Payment made - too late to change artisan",
-		domain.BookingEnroute:        "Artisan already traveling - too late",
-		domain.BookingInProgress:     "Work has started - cannot change artisan",
-		domain.BookingCompleted:      "Work finished - rematch not applicable",
-		domain.BookingCancelled:      "Booking cancelled - rematch not applicable",
-		domain.BookingPaymentPending: "Payment in process - too late to change",
+		domain.BookingRequested:         "Too early - no artisan interaction yet",
+		domain.BookingConfirmed:         "Payment made - too late to change artisan",
+		domain.BookingEnroute:           "Artisan already traveling - too late",
+		domain.BookingInProgress:        "Work has started - cannot change artisan",
+		domain.BookingCompletionPending: "Work completion is awaiting customer confirmation",
+		domain.BookingCompleted:         "Work finished - rematch not applicable",
+		domain.BookingCancelled:         "Booking cancelled - rematch not applicable",
+		domain.BookingPaymentPending:    "Payment in process - too late to change",
 	}
 
 	t.Log("=== ELIGIBLE STATES FOR REMATCH ===")

@@ -6,37 +6,39 @@ import "time"
 type BookingStatus string
 
 const (
-	BookingRequested      BookingStatus = "requested"
-	BookingOfferPending   BookingStatus = "offer_pending"
-	BookingOfferRejected  BookingStatus = "offer_rejected"
-	BookingAssigned       BookingStatus = "assigned"
-	BookingPendingQuote   BookingStatus = "pending_quote"
-	BookingQuoteProposed  BookingStatus = "quote_proposed"
-	BookingQuoteAccepted  BookingStatus = "quote_accepted"
-	BookingQuoteRejected  BookingStatus = "quote_rejected"
-	BookingPaymentPending BookingStatus = "payment_pending"
-	BookingConfirmed      BookingStatus = "confirmed"
-	BookingEnroute        BookingStatus = "enroute"
-	BookingInProgress     BookingStatus = "in_progress"
-	BookingCompleted      BookingStatus = "completed"
-	BookingCancelled      BookingStatus = "cancelled"
-	BookingClosed         BookingStatus = "closed"
+	BookingRequested         BookingStatus = "requested"
+	BookingOfferPending      BookingStatus = "offer_pending"
+	BookingOfferRejected     BookingStatus = "offer_rejected"
+	BookingAssigned          BookingStatus = "assigned"
+	BookingPendingQuote      BookingStatus = "pending_quote"
+	BookingQuoteProposed     BookingStatus = "quote_proposed"
+	BookingQuoteAccepted     BookingStatus = "quote_accepted"
+	BookingQuoteRejected     BookingStatus = "quote_rejected"
+	BookingPaymentPending    BookingStatus = "payment_pending"
+	BookingConfirmed         BookingStatus = "confirmed"
+	BookingEnroute           BookingStatus = "enroute"
+	BookingInProgress        BookingStatus = "in_progress"
+	BookingCompletionPending BookingStatus = "completion_pending"
+	BookingCompleted         BookingStatus = "completed"
+	BookingCancelled         BookingStatus = "cancelled"
+	BookingClosed            BookingStatus = "closed"
 )
 
 // Valid status transitions
 var validTransitions = map[BookingStatus]map[BookingStatus]bool{
-	BookingRequested:      {BookingOfferPending: true, BookingCancelled: true},
-	BookingOfferPending:   {BookingAssigned: true, BookingOfferRejected: true, BookingCancelled: true},
-	BookingOfferRejected:  {BookingOfferPending: true, BookingCancelled: true},
-	BookingAssigned:       {BookingPendingQuote: true, BookingCancelled: true},
-	BookingPendingQuote:   {BookingQuoteProposed: true, BookingCancelled: true},
-	BookingQuoteProposed:  {BookingQuoteAccepted: true, BookingCancelled: true},
-	BookingQuoteAccepted:  {BookingPaymentPending: true, BookingCancelled: true},
-	BookingPaymentPending: {BookingConfirmed: true, BookingCancelled: true, BookingQuoteAccepted: true, BookingAssigned: true},
-	BookingConfirmed:      {BookingEnroute: true, BookingCancelled: true},
-	BookingEnroute:        {BookingInProgress: true, BookingCancelled: true},
-	BookingInProgress:     {BookingCompleted: true, BookingCancelled: true},
-	BookingCompleted:      {BookingClosed: true},
+	BookingRequested:         {BookingOfferPending: true, BookingCancelled: true},
+	BookingOfferPending:      {BookingAssigned: true, BookingOfferRejected: true, BookingCancelled: true},
+	BookingOfferRejected:     {BookingOfferPending: true, BookingCancelled: true},
+	BookingAssigned:          {BookingPendingQuote: true, BookingCancelled: true},
+	BookingPendingQuote:      {BookingQuoteProposed: true, BookingCancelled: true},
+	BookingQuoteProposed:     {BookingQuoteAccepted: true, BookingCancelled: true},
+	BookingQuoteAccepted:     {BookingPaymentPending: true, BookingCancelled: true},
+	BookingPaymentPending:    {BookingConfirmed: true, BookingCancelled: true, BookingQuoteAccepted: true, BookingAssigned: true},
+	BookingConfirmed:         {BookingEnroute: true, BookingCancelled: true},
+	BookingEnroute:           {BookingInProgress: true, BookingCancelled: true},
+	BookingInProgress:        {BookingCompletionPending: true},
+	BookingCompletionPending: {BookingCompleted: true},
+	BookingCompleted:         {BookingClosed: true},
 	// No transitions from cancelled/closed
 }
 
@@ -65,6 +67,31 @@ type Booking struct {
 	CreatedAt time.Time `json:"created_at"`
 	UpdatedAt time.Time `json:"updated_at"`
 	Version   int64     `json:"version"` // For optimistic locking
+}
+
+// IsValidBookingStatus checks whether a status is a known booking status.
+func IsValidBookingStatus(status BookingStatus) bool {
+	switch status {
+	case BookingRequested,
+		BookingOfferPending,
+		BookingOfferRejected,
+		BookingAssigned,
+		BookingPendingQuote,
+		BookingQuoteProposed,
+		BookingQuoteAccepted,
+		BookingQuoteRejected,
+		BookingPaymentPending,
+		BookingConfirmed,
+		BookingEnroute,
+		BookingInProgress,
+		BookingCompletionPending,
+		BookingCompleted,
+		BookingCancelled,
+		BookingClosed:
+		return true
+	default:
+		return false
+	}
 }
 
 // CanTransition checks if a status transition is valid

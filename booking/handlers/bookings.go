@@ -277,11 +277,15 @@ func (h *BookingsHandler) UpdateBookingStatus(ctx context.Context, id string, re
 		return nil, binternal.ErrDatabaseError
 	}
 
-	if err := binternal.AuthorizeStatusUpdate(ctx, userRole, userCtx.ID, current); err != nil {
-		return nil, err
+	newStatus := domain.BookingStatus(req.Status)
+	if !domain.IsValidBookingStatus(newStatus) {
+		return nil, errs.B().Code(errs.InvalidArgument).Msg("invalid booking status").
+			Meta("status", req.Status).Err()
 	}
 
-	newStatus := domain.BookingStatus(req.Status)
+	if err := binternal.AuthorizeStatusUpdate(ctx, userRole, userCtx.ID, current, newStatus); err != nil {
+		return nil, err
+	}
 	if !domain.CanTransition(current.Status, newStatus) {
 		return nil, errs.B().Code(errs.InvalidArgument).Msg("invalid status transition").
 			Meta("from", string(current.Status)).
@@ -383,6 +387,7 @@ func (h *BookingsHandler) ListBookings(ctx context.Context, params *ListBookings
 			domain.BookingConfirmed,
 			domain.BookingEnroute,
 			domain.BookingInProgress,
+			domain.BookingCompletionPending,
 			domain.BookingCompleted,
 			domain.BookingCancelled,
 			domain.BookingClosed,
