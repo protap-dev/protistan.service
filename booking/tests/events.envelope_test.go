@@ -105,6 +105,7 @@ func TestGetBookingEventType(t *testing.T) {
 		{domain.BookingConfirmed, "booking.confirmed"},
 		{domain.BookingEnroute, "booking.enroute"},
 		{domain.BookingInProgress, "booking.in_progress"},
+		{domain.BookingCompletionPending, "booking.completion_pending"},
 		{domain.BookingCompleted, "booking.completed"},
 		{domain.BookingCancelled, "booking.cancelled"},
 		{domain.BookingClosed, "booking.closed"},

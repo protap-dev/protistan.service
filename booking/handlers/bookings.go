@@ -277,11 +277,15 @@ func (h *BookingsHandler) UpdateBookingStatus(ctx context.Context, id string, re
 		return nil, binternal.ErrDatabaseError
 	}
 
-	if err := binternal.AuthorizeStatusUpdate(ctx, userRole, userCtx.ID, current); err != nil {
-		return nil, err
+	newStatus := domain.BookingStatus(req.Status)
+	if !domain.IsValidBookingStatus(newStatus) {
+		return nil, errs.B().Code(errs.InvalidArgument).Msg("invalid booking status").
+			Meta("status", req.Status).Err()
 	}
 
-	newStatus := domain.BookingStatus(req.Status)
+	if err := binternal.AuthorizeStatusUpdate(ctx, userRole, userCtx.ID, current, newStatus); err != nil {
+		return nil, err
+	}
 	if !domain.CanTransition(current.Status, newStatus) {
 		return nil, errs.B().Code(errs.InvalidArgument).Msg("invalid status transition").
 			Meta("from", string(current.Status)).
@@ -370,29 +374,12 @@ func (h *BookingsHandler) ListBookings(ctx context.Context, params *ListBookings
 	if params.Status != "" {
 		// Split comma-separated statuses
 		statusStrings := strings.Split(params.Status, ",")
-		validStatuses := []domain.BookingStatus{
-			domain.BookingRequested,
-			domain.BookingOfferPending,
-			domain.BookingOfferRejected,
-			domain.BookingAssigned,
-			domain.BookingPendingQuote,
-			domain.BookingQuoteProposed,
-			domain.BookingQuoteAccepted,
-			domain.BookingQuoteRejected,
-			domain.BookingPaymentPending,
-			domain.BookingConfirmed,
-			domain.BookingEnroute,
-			domain.BookingInProgress,
-			domain.BookingCompleted,
-			domain.BookingCancelled,
-			domain.BookingClosed,
-		}
 
 		// Validate each status
 		requestedStatuses := make([]domain.BookingStatus, 0, len(statusStrings))
 		for _, s := range statusStrings {
 			status := domain.BookingStatus(strings.TrimSpace(s))
-			if !slices.Contains(validStatuses, status) {
+			if !domain.IsValidBookingStatus(status) {
 				return nil, binternal.ErrValidationFailed
 			}
 			requestedStatuses = append(requestedStatuses, status)
