@@ -69,9 +69,9 @@ func getTopicForEvent(event *domain.BookingEvent) string {
 		return "booking.status"
 	case domain.BookingInProgress:
 		return "booking.status"
-	case domain.BookingQuoteAccepted:
+	case domain.BookingCompletionPending:
 		return "booking.status"
-	case domain.BookingQuoteRejected:
+	case domain.BookingQuoteAccepted:
 		return "booking.status"
 	case domain.BookingCompleted:
 		return "booking.status"
