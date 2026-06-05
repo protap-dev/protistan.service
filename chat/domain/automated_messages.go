@@ -196,7 +196,16 @@ var AutomatedMessages = map[string]AutomatedMessageTemplate{
 		},
 	},
 
-	// 9. Work Completed
+	// 9. Completion Pending
+	"booking.completion_pending": {
+		EventType:   "booking.completion_pending",
+		MessageType: MessageTypeStatusUpdate,
+		ContentFunc: func(data map[string]interface{}) string {
+			return "The artisan marked the work as complete. Please confirm after reviewing the service."
+		},
+	},
+
+	// 10. Work Completed
 	"booking.completed": {
 		EventType:   "booking.completed",
 		MessageType: MessageTypeStatusUpdate,
@@ -205,7 +214,7 @@ var AutomatedMessages = map[string]AutomatedMessageTemplate{
 		},
 	},
 
-	// 10. Booking Cancelled
+	// 11. Booking Cancelled
 	"booking.cancelled": {
 		EventType:   "booking.cancelled",
 		MessageType: MessageTypeStatusUpdate,

@@ -36,6 +36,7 @@ create table bookings (
         'confirmed',
         'enroute',
         'in_progress',
+        'completion_pending',
         'completed',
         'cancelled',
         'closed'
