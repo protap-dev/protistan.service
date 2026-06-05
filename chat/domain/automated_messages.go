@@ -134,20 +134,7 @@ var AutomatedMessages = map[string]AutomatedMessageTemplate{
 		},
 	},
 
-	// 4. Quote Rejected
-	"booking.quote_rejected": {
-		EventType:   "booking.quote_rejected",
-		MessageType: MessageTypeStatusUpdate,
-		ContentFunc: func(data map[string]interface{}) string {
-			reason := strings.TrimSpace(safeString(data, "reason", ""))
-			if reason != "" {
-				return fmt.Sprintf("The quote was declined. Reason: %s", reason)
-			}
-			return "The quote was declined. A revised quote can be submitted."
-		},
-	},
-
-	// 5. Payment Pending
+	// 4. Payment Pending
 	"booking.payment_pending": {
 		EventType:   "booking.payment_pending",
 		MessageType: MessageTypeStatusUpdate,
@@ -159,7 +146,7 @@ var AutomatedMessages = map[string]AutomatedMessageTemplate{
 		},
 	},
 
-	// 6. Booking Confirmed
+	// 5. Booking Confirmed
 	"booking.confirmed": {
 		EventType:   "booking.confirmed",
 		MessageType: MessageTypeStatusUpdate,
@@ -172,7 +159,7 @@ var AutomatedMessages = map[string]AutomatedMessageTemplate{
 		},
 	},
 
-	// 7. Artisan En Route
+	// 6. Artisan En Route
 	"booking.enroute": {
 		EventType:   "booking.enroute",
 		MessageType: MessageTypeStatusUpdate,
@@ -187,12 +174,21 @@ var AutomatedMessages = map[string]AutomatedMessageTemplate{
 		},
 	},
 
-	// 8. Work In Progress
+	// 7. Work In Progress
 	"booking.in_progress": {
 		EventType:   "booking.in_progress",
 		MessageType: MessageTypeStatusUpdate,
 		ContentFunc: func(data map[string]interface{}) string {
 			return "Work on this booking has started."
+		},
+	},
+
+	// 8. Completion Pending
+	"booking.completion_pending": {
+		EventType:   "booking.completion_pending",
+		MessageType: MessageTypeStatusUpdate,
+		ContentFunc: func(data map[string]interface{}) string {
+			return "The artisan marked the work as complete. Please confirm after reviewing the service."
 		},
 	},
 

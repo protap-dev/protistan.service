@@ -115,19 +115,11 @@ func ValidateIdempotency(ctx context.Context, bookingID string, expectedVersion 
 
 // validateRematchEligibility checks if a booking is in a state where rematch is allowed
 func ValidateRematchEligibility(ctx context.Context, status domain.BookingStatus) error {
-	eligibleStates := map[domain.BookingStatus]bool{
-		domain.BookingOfferPending:  true,
-		domain.BookingOfferRejected: true,
-		domain.BookingAssigned:      true,
-		domain.BookingPendingQuote:  true,
-		domain.BookingQuoteRejected: true,
-	}
-
-	if !eligibleStates[status] {
+	if !domain.CanRematchFromStatus(status) {
 		return errs.B().Code(errs.InvalidArgument).
 			Msg("booking is not in a state where rematch is allowed").
 			Meta("current_status", string(status)).
-			Meta("allowed_states", "offer_pending, offer_rejected, assigned, pending_quote, quote_rejected").
+			Meta("allowed_states", "offer_pending, offer_rejected, assigned, pending_quote").
 			Err()
 	}
 

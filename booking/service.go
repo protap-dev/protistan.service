@@ -439,7 +439,7 @@ func paymentReservationResponse(booking *domain.Booking) *BookingPaymentStatusRe
 
 func canApplyQuoteProposedEvent(status domain.BookingStatus) bool {
 	switch status {
-	case domain.BookingAssigned, domain.BookingPendingQuote, domain.BookingQuoteRejected:
+	case domain.BookingAssigned, domain.BookingPendingQuote:
 		return true
 	case domain.BookingQuoteProposed:
 		return false

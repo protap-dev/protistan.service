@@ -11,7 +11,7 @@ create table bookings (
     is_flexible boolean DEFAULT false,
     description text check (length(description) >= 20),
     customer_address_id uuid not null, -- Reference to customer service 
-    status varchar(20) not null default 'pending_payment',
+    status varchar(20) not null default 'requested',
     priority varchar(10) default 'normal',
     scheduled_at timestamptz,
 
@@ -31,11 +31,11 @@ create table bookings (
         'pending_quote',
         'quote_proposed',
         'quote_accepted',
-        'quote_rejected',
         'payment_pending',
         'confirmed',
         'enroute',
         'in_progress',
+        'completion_pending',
         'completed',
         'cancelled',
         'closed'
