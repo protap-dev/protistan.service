@@ -43,6 +43,8 @@ func GetBookingEventType(status domain.BookingStatus) string {
 		return "booking.enroute"
 	case domain.BookingInProgress:
 		return "booking.in_progress"
+	case domain.BookingCompletionPending:
+		return "booking.completion_pending"
 	case domain.BookingCompleted:
 		return "booking.completed"
 	case domain.BookingCancelled:

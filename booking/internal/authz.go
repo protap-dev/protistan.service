@@ -23,32 +23,51 @@ func VerifyUserAccess(ctx context.Context, userID string, booking *domain.Bookin
 	return ErrPermissionDenied
 }
 
-// AuthorizeStatusUpdate validates whether the given role/user can update the booking status
-func AuthorizeStatusUpdate(ctx context.Context, role string, userID string, booking *domain.Booking) error {
-	switch role {
-	case "customer":
-		if booking.CustomerID != userID {
-			return ErrPermissionDenied
-		}
+// AuthorizeStatusUpdate validates whether the given role/user can perform a specific status transition.
+func AuthorizeStatusUpdate(ctx context.Context, role string, userID string, booking *domain.Booking, targetStatus domain.BookingStatus) error {
+	if booking == nil {
+		return ErrPermissionDenied
+	}
+	if role == "admin" {
 		return nil
+	}
 
-	case "artisan":
-		if booking.ArtisanID == nil {
-			return ErrPermissionDenied
-		}
-
-		if *booking.ArtisanID != userID {
-			return ErrPermissionDenied
-		}
-
-		return nil
-
-	case "admin":
-		return nil
-
+	switch targetStatus {
+	case domain.BookingCancelled:
+		return AuthorizeCancel(ctx, userID, booking)
+	case domain.BookingEnroute:
+		return authorizeArtisanTransition(role, userID, booking, domain.BookingConfirmed)
+	case domain.BookingInProgress:
+		return authorizeArtisanTransition(role, userID, booking, domain.BookingEnroute)
+	case domain.BookingCompletionPending:
+		return authorizeArtisanTransition(role, userID, booking, domain.BookingInProgress)
+	case domain.BookingCompleted:
+		return authorizeCustomerTransition(role, userID, booking, domain.BookingCompletionPending)
+	case domain.BookingClosed:
+		return authorizeCustomerTransition(role, userID, booking, domain.BookingCompleted)
 	default:
 		return ErrPermissionDenied
 	}
+}
+
+func authorizeArtisanTransition(role string, userID string, booking *domain.Booking, requiredStatus domain.BookingStatus) error {
+	if role != "artisan" || booking.ArtisanID == nil || *booking.ArtisanID != userID {
+		return ErrPermissionDenied
+	}
+	if booking.Status != requiredStatus {
+		return errs.B().Code(errs.FailedPrecondition).Msg("booking is not ready for this status update").Err()
+	}
+	return nil
+}
+
+func authorizeCustomerTransition(role string, userID string, booking *domain.Booking, requiredStatus domain.BookingStatus) error {
+	if role != "customer" || booking.CustomerID != userID {
+		return ErrPermissionDenied
+	}
+	if booking.Status != requiredStatus {
+		return errs.B().Code(errs.FailedPrecondition).Msg("booking is not ready for this status update").Err()
+	}
+	return nil
 }
 
 // AuthorizeCancel validates whether the user can cancel the booking
@@ -69,6 +88,7 @@ func AuthorizeCancel(ctx context.Context, userID string, booking *domain.Booking
 		domain.BookingEnroute:
 		return nil
 	case domain.BookingInProgress,
+		domain.BookingCompletionPending,
 		domain.BookingCompleted,
 		domain.BookingCancelled,
 		domain.BookingClosed:
